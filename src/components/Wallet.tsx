@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Keypair } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { getWalletKeypair, saveWalletToStorage } from '../utils/wallet';
+import { WalletStorage } from '../services/wallet/types';
 import WalletBackup from './WalletBackup';
+import SuccessModal from './SuccessModal';
 
 const Wallet: React.FC = () => {
   const [keypair, setKeypair] = useState<Keypair | null>(null);
@@ -30,7 +32,13 @@ const Wallet: React.FC = () => {
   }, []);
 
   const handleRestore = async (restoredKeypair: Keypair) => {
-    await saveWalletToStorage(restoredKeypair);
+    const walletStorage: WalletStorage = {
+      blazr_wallet: {
+        publicKey: restoredKeypair.publicKey.toBase58(),
+        secretKey: Array.from(restoredKeypair.secretKey)
+      }
+    };
+    await saveWalletToStorage(walletStorage);
     setKeypair(restoredKeypair);
     setShowBackup(false);
   };
@@ -56,7 +64,13 @@ const Wallet: React.FC = () => {
       const decodedKey = (bs58 as any).decode(privateKeyInput.trim());
       const newKeypair = Keypair.fromSecretKey(decodedKey);
 
-      await saveWalletToStorage(newKeypair);
+      const walletStorage: WalletStorage = {
+        blazr_wallet: {
+          publicKey: newKeypair.publicKey.toBase58(),
+          secretKey: Array.from(newKeypair.secretKey)
+        }
+      };
+      await saveWalletToStorage(walletStorage);
       setKeypair(newKeypair);
       setImportSuccessMessage('✅ Wallet imported successfully!');
       setShowImportModal(false);
@@ -118,9 +132,14 @@ const Wallet: React.FC = () => {
       </button>
 
       {importSuccessMessage && (
-        <div className="mb-4 p-3 rounded-md bg-green-700/30 border border-green-500 text-green-300 text-sm">
-          {importSuccessMessage}
-        </div>
+        <SuccessModal
+          title="Wallet Imported!"
+          message="You can now manage assets and launch tokens."
+          buttons={[
+            { label: 'Done', onClick: () => setImportSuccessMessage(null) },
+          ]}
+          onClose={() => setImportSuccessMessage(null)}
+        />
       )}
 
       {showImportModal && (

@@ -1,12 +1,6 @@
 import { Keypair } from '@solana/web3.js';
-
-interface WalletStorage {
-  blazr_wallet?: {
-    publicKey: string;
-    secretKey: number[];
-  };
-  blazr_api_key?: string;
-}
+import { createClient } from '@supabase/supabase-js';
+import { WalletStorage } from '../services/wallet/types';
 
 interface StoredWallet {
   publicKey: string;
@@ -62,46 +56,95 @@ export const getAllStoredWallets = async (): Promise<StoredWallet[]> => {
   }
 };
 
-export const getWalletFromStorage = async () => {
-  return new Promise<any>((resolve) => {
-    chrome.storage.local.get(['blazr_wallet'], (result) => {
-      resolve(result);
-    });
-  });
+// Check if Chrome storage is available
+const isChromeStorageAvailable = () => {
+  return typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
 };
 
-export const saveWalletToStorage = async (keypair: Keypair) => {
-  return new Promise<void>((resolve) => {
-    chrome.storage.local.set({
-      blazr_wallet: {
-        secretKey: Array.from(keypair.secretKey),
-        publicKey: keypair.publicKey.toBase58()
+// Get wallet from storage
+export const getWalletFromStorage = async (): Promise<WalletStorage> => {
+  try {
+    if (isChromeStorageAvailable()) {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(['blazr_wallet', 'blazr_api_key'], (result) => {
+          resolve({
+            blazr_wallet: result.blazr_wallet,
+            blazr_api_key: result.blazr_api_key
+          });
+        });
+      });
+    } else {
+      const walletData = localStorage.getItem('blazr_wallet');
+      const apiKey = localStorage.getItem('blazr_api_key');
+      return {
+        blazr_wallet: walletData ? JSON.parse(walletData) : undefined,
+        blazr_api_key: apiKey || undefined
+      };
+    }
+  } catch (error) {
+    console.error('Error getting wallet from storage:', error);
+    return { blazr_wallet: undefined, blazr_api_key: undefined };
+  }
+};
+
+// Save wallet to storage
+export const saveWalletToStorage = async (walletObj: WalletStorage): Promise<void> => {
+  try {
+    if (isChromeStorageAvailable()) {
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set(walletObj, resolve);
+      });
+    } else {
+      if (walletObj.blazr_wallet) {
+        localStorage.setItem('blazr_wallet', JSON.stringify(walletObj.blazr_wallet));
       }
-    }, () => {
-      resolve();
-    });
-  });
+      if (walletObj.blazr_api_key) {
+        localStorage.setItem('blazr_api_key', walletObj.blazr_api_key);
+      }
+    }
+  } catch (error) {
+    console.error('Error saving wallet to storage:', error);
+    throw error;
+  }
 };
 
-export const clearWalletFromStorage = async () => {
-  return new Promise<void>((resolve) => {
-    chrome.storage.local.remove(['blazr_wallet'], () => {
-      resolve();
-    });
-  });
+// Generate new wallet
+export const generateNewWallet = async (): Promise<WalletStorage> => {
+  const keypair = Keypair.generate();
+  const walletStorage: WalletStorage = {
+    blazr_wallet: {
+      publicKey: keypair.publicKey.toBase58(),
+      secretKey: Array.from(keypair.secretKey)
+    }
+  };
+  await saveWalletToStorage(walletStorage);
+  return walletStorage;
 };
 
-export const hasWallet = async (): Promise<boolean> => {
-  const storage = await getWalletFromStorage();
-  return !!storage.blazr_wallet;
-};
-
+// Get wallet keypair
 export const getWalletKeypair = async (): Promise<Keypair | null> => {
   const storage = await getWalletFromStorage();
-  if (!storage.blazr_wallet) {
+  if (!storage?.blazr_wallet) {
     return null;
   }
   return Keypair.fromSecretKey(Uint8Array.from(storage.blazr_wallet.secretKey));
+};
+
+// Clear wallet from storage
+export const clearWalletFromStorage = async (): Promise<void> => {
+  try {
+    if (isChromeStorageAvailable()) {
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.remove(['blazr_wallet', 'blazr_api_key'], resolve);
+      });
+    } else {
+      localStorage.removeItem('blazr_wallet');
+      localStorage.removeItem('blazr_api_key');
+    }
+  } catch (error) {
+    console.error('Error clearing wallet from storage:', error);
+    throw error;
+  }
 };
 
 export const setWalletToStorage = async (walletObj: WalletStorage, walletName?: string): Promise<void> => {
@@ -140,6 +183,17 @@ export const removeWalletFromStorage = async (walletName: string): Promise<void>
   }
 };
 
-const isChromeStorageAvailable = (): boolean => {
-  return typeof chrome !== 'undefined' && chrome.storage !== undefined;
-}; 
+// --- Device ID Helper ---
+export function getOrCreateDeviceId(): string {
+  let deviceId = localStorage.getItem('blazr_device_id');
+  if (!deviceId) {
+    deviceId = crypto.randomUUID();
+    localStorage.setItem('blazr_device_id', deviceId);
+  }
+  return deviceId;
+}
+
+// --- Supabase Client ---
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.REACT_APP_SUPABASE_KEY || process.env.SUPABASE_KEY || '';
+const supabase = createClient(supabaseUrl, supabaseKey); 

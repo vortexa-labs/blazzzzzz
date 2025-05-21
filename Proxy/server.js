@@ -5,11 +5,47 @@ const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
 const FormData = require('form-data');
-require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+const { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Keypair } = require('@solana/web3.js');
+const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, createTransferInstruction } = require('@solana/spl-token');
+const { Helius } = require('helius-sdk');
+const OpenAI = require('openai');
+const { encode } = require('bs58');
+const bip39 = require('bip39');
+const { derivePath } = require('ed25519-hd-key');
+
+// Load environment variables from the correct path
+require('dotenv').config({ path: '../.env' });
+
+// Debug logging
+console.log('Environment check:');
+console.log('- HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? 'Defined' : 'Not defined');
 
 const app = express();
-const PORT = 4000;
-const upload = multer({ dest: 'uploads/' });
+const PORT = process.env.PORT || 4000;
+
+// Create uploads directory if it doesn't exist
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
+const upload = multer({ dest: uploadDir });
+
+// Initialize clients
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const helius = new Helius(process.env.HELIUS_API_KEY);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, '../public')));
+
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  next();
+});
 
 // Enable CORS with specific options
 app.use(cors({
@@ -23,9 +59,677 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Serve static files from uploads directory
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(uploadDir));
 
-// Proxy endpoint for trade-local
+// Serve static assets for frontend compatibility
+app.use('/assets', express.static(path.join(__dirname, '../src/assets')));
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: err.message,
+    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
+
+// --- Supabase Caching Helpers ---
+const CACHE_TTL_MS = 1 * 60 * 1000; // 1 minute
+
+async function getCachedTokenMetadata(mint) {
+  try {
+    const { data, error } = await supabase
+      .from('token_metadata')
+      .select('*')
+      .eq('mint', mint)
+      .single();
+    if (error || !data) return null;
+    if (data.last_updated && Date.now() - new Date(data.last_updated).getTime() < CACHE_TTL_MS) {
+      return data;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function setCachedTokenMetadata(mint, meta) {
+  try {
+    await supabase.from('token_metadata').upsert({
+      mint,
+      name: meta.name,
+      symbol: meta.symbol,
+      logo_uri: meta.logo_uri,
+      last_updated: new Date().toISOString(),
+    });
+  } catch (e) {}
+}
+
+async function getCachedTokenBalance(publicKey, mint) {
+  try {
+    const { data, error } = await supabase
+      .from('token_balances')
+      .select('*')
+      .eq('public_key', publicKey)
+      .eq('mint', mint)
+      .single();
+    if (error || !data) return null;
+    if (data.last_updated && Date.now() - new Date(data.last_updated).getTime() < CACHE_TTL_MS) {
+      return data.balance;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function setCachedTokenBalance(publicKey, mint, balance) {
+  try {
+    await supabase.from('token_balances').upsert({
+      public_key: publicKey,
+      mint,
+      balance,
+      last_updated: new Date().toISOString(),
+    });
+  } catch (e) {}
+}
+
+// Add price caching constants
+const PRICE_CACHE_TTL_MS = 1 * 60 * 1000; // 1 minute cache
+
+// Add price caching functions
+async function getCachedTokenPrices(tokenAddresses) {
+  try {
+    const { data, error } = await supabase
+      .from('token_prices')
+      .select('*')
+      .in('token_address', tokenAddresses)
+      .gte('last_updated', new Date(Date.now() - PRICE_CACHE_TTL_MS).toISOString());
+
+    if (error) {
+      console.error('Error fetching cached prices:', error);
+      return {};
+    }
+
+    const priceMap = {};
+    data.forEach(record => {
+      priceMap[record.token_address] = {
+        usdPrice: record.usd_price,
+        name: record.name,
+        symbol: record.symbol,
+        logo: record.logo,
+        priceChange24h: record.price_change_24h
+      };
+    });
+
+    return priceMap;
+  } catch (e) {
+    console.error('Error in getCachedTokenPrices:', e);
+    return {};
+  }
+}
+
+async function cacheTokenPrices(priceData) {
+  try {
+    const now = new Date().toISOString();
+    const records = Object.entries(priceData).map(([address, data]) => ({
+      token_address: address,
+      usd_price: data.usdPrice,
+      name: data.name,
+      symbol: data.symbol,
+      logo: data.logo,
+      price_change_24h: data.priceChange24h,
+      last_updated: now
+    }));
+
+    if (records.length > 0) {
+      const { error } = await supabase
+        .from('token_prices')
+        .upsert(records, {
+          onConflict: 'token_address',
+          ignoreDuplicates: false
+        });
+
+      if (error) {
+        console.error('Error caching token prices:', error);
+      }
+    }
+  } catch (e) {
+    console.error('Error in cacheTokenPrices:', e);
+  }
+}
+
+// Add wallet balance cache constants
+const WALLET_CACHE_TTL_MS = 1 * 60 * 1000; // 1 minute cache
+
+// Add wallet balance caching functions
+async function getCachedWalletTokens(owner) {
+  try {
+    const { data, error } = await supabase
+      .from('wallet_tokens')
+      .select('*')
+      .eq('owner', owner)
+      .single();
+    if (error || !data) return null;
+    if (data.last_updated && Date.now() - new Date(data.last_updated).getTime() < WALLET_CACHE_TTL_MS) {
+      return JSON.parse(data.tokens_json);
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function setCachedWalletTokens(owner, tokens) {
+  try {
+    await supabase.from('wallet_tokens').upsert({
+      owner,
+      tokens_json: JSON.stringify(tokens),
+      last_updated: new Date().toISOString(),
+    });
+  } catch (e) {}
+}
+
+// --- Token Generation Endpoint ---
+app.post('/api/generate-token-data', async (req, res) => {
+  try {
+    const { text, mediaUrls, tweetUrl, authorName, authorAvatar, imageFile } = req.body;
+    console.log('Received token generation request:', { tweetUrl, authorName });
+
+    if (!text || !tweetUrl || !authorName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['text', 'tweetUrl', 'authorName']
+      });
+    }
+
+    // Check if tweet already exists in database
+    const { data: existingTweet, error: queryError } = await supabase
+      .from('processed_tweets')
+      .select('*')
+      .eq('tweet_url', tweetUrl)
+      .single();
+
+    if (queryError && queryError.code !== 'PGRST116') {
+      console.error('Database query error:', queryError);
+      throw new Error('Failed to check existing tweet');
+    }
+
+    if (existingTweet) {
+      return res.json({
+        name: existingTweet.token_name,
+        ticker: existingTweet.token_ticker,
+        description: existingTweet.token_description,
+        image: existingTweet.token_image,
+        website: existingTweet.token_website,
+        pumpPortalTx: existingTweet.pump_portal_tx || null
+      });
+    }
+
+    // Generate meme token data with OpenAI
+    const prompt = `Given this tweet:\nText: "${text}"\nAuthor: ${authorName}\nGenerate a meme token based on this tweet with the following format:\n{\n  "name": "A catchy, meme-worthy name based on the tweet's theme or author (max 3 words)",\n  "ticker": "A 3-6 letter acronym or playful reference to the name",\n  "description": "A one-sentence meme-worthy summary of the tweet (max 15 words)"\n}\nMake it funny and viral-worthy.`;
+    let tokenData;
+    try {
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: [
+          { role: "system", content: "You are a creative meme token generator. Generate funny, viral-worthy token names and descriptions based on tweets." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+      });
+      const response = completion.choices[0].message.content;
+      tokenData = JSON.parse(response);
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      throw new Error('Failed to generate token data');
+    }
+
+    // Use imageFile (base64) for the image
+    if (!imageFile) {
+      return res.status(400).json({ error: 'Image file is required (base64 string)' });
+    }
+
+    // Step 1: Upload metadata to pump.fun IPFS
+    let metadataUri;
+    try {
+      const formData = new FormData();
+      formData.append('name', tokenData.name);
+      formData.append('symbol', tokenData.ticker);
+      formData.append('description', tokenData.description);
+      formData.append('website', tweetUrl);
+      formData.append('showName', 'true');
+
+      // Write base64 image to file
+      const imageBuffer = Buffer.from(imageFile.split(',')[1], 'base64');
+      const tmpImagePath = path.join(uploadDir, `tmp_${Date.now()}.png`);
+      fs.writeFileSync(tmpImagePath, imageBuffer);
+      formData.append('file', fs.createReadStream(tmpImagePath), 'image.png');
+
+      const ipfsResp = await axios.post('https://pump.fun/api/ipfs', formData, { headers: formData.getHeaders() });
+      fs.unlinkSync(tmpImagePath);
+      metadataUri = ipfsResp.data.metadataUri;
+    } catch (error) {
+      console.error('IPFS upload error:', error);
+      throw new Error('Failed to upload metadata to IPFS');
+    }
+
+    // Step 2: Generate mint keypair
+    const mintKeypair = Keypair.generate();
+    const mintBase58 = encode(mintKeypair.secretKey);
+
+    // Step 3: POST to pumpportal.fun/api/trade
+    let tradeResp;
+    try {
+      const tradePayload = {
+        action: 'create',
+        tokenMetadata: {
+          name: tokenData.name,
+          symbol: tokenData.ticker,
+          uri: metadataUri
+        },
+        mint: mintBase58,
+        denominatedInSol: 'true',
+        amount: 1, // dev buy 1 SOL
+        slippage: 10,
+        priorityFee: 0.0005,
+        pool: 'pump'
+      };
+      tradeResp = await axios.post(
+        'https://pumpportal.fun/api/trade',
+        tradePayload,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (error) {
+      console.error('Pump Portal API error:', error);
+      throw new Error('Failed to create token on Pump Portal');
+    }
+
+    // Step 4: Store in database
+    try {
+      await supabase.from('processed_tweets').insert({
+        tweet_url: tweetUrl,
+        tweet_text: text,
+        author_name: authorName,
+        author_avatar: authorAvatar,
+        media_urls: mediaUrls,
+        token_name: tokenData.name,
+        token_ticker: tokenData.ticker,
+        token_description: tokenData.description,
+        token_image: imageFile,
+        token_website: tweetUrl,
+        pump_portal_tx: tradeResp.data
+      });
+    } catch (error) {
+      console.error('Database insert error:', error);
+      throw new Error('Failed to store token data in database');
+    }
+
+    res.json({
+      ...tokenData,
+      pumpPortalTx: tradeResp.data
+    });
+  } catch (error) {
+    console.error('Token generation error:', error);
+    res.status(500).json({
+      error: 'Failed to generate token',
+      message: error.message
+    });
+  }
+});
+
+// --- Generate Token Metadata Only Endpoint ---
+app.post('/api/generate-token-metadata', async (req, res) => {
+  try {
+    const { text, mediaUrls, tweetUrl, authorName, authorAvatar } = req.body;
+    if (!text || !tweetUrl || !authorName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        required: ['text', 'tweetUrl', 'authorName']
+      });
+    }
+    // Check if tweet already exists in database
+    const { data: existingTweet, error: queryError } = await supabase
+      .from('processed_tweets')
+      .select('*')
+      .eq('tweet_url', tweetUrl)
+      .single();
+    if (existingTweet) {
+      return res.json({
+        name: existingTweet.token_name,
+        ticker: existingTweet.token_ticker,
+        description: existingTweet.token_description,
+        image: existingTweet.token_image,
+        twitterUrl: existingTweet.token_website || tweetUrl
+      });
+    }
+    // Generate meme token data with OpenAI
+    const prompt = `Given this tweet:\nText: "${text}"\nAuthor: ${authorName}\nGenerate a meme token based on this tweet with the following format:\n{\n  "name": "A catchy, meme-worthy name based on the tweet's theme or author (max 3 words)",\n  "ticker": "A 3-6 letter acronym or playful reference to the name",\n  "description": "A one-sentence meme-worthy summary of the tweet (max 15 words)"\n}\nMake it funny and viral-worthy.`;
+    let tokenData;
+    try {
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4",
+        messages: [
+          { role: "system", content: "You are a creative meme token generator. Generate funny, viral-worthy token names and descriptions based on tweets." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+      });
+      const response = completion.choices[0].message.content;
+      tokenData = JSON.parse(response);
+    } catch (error) {
+      console.error('OpenAI API error:', error);
+      throw new Error('Failed to generate token data');
+    }
+    // Pick best image: first media or author avatar
+    tokenData.image = (mediaUrls && mediaUrls.length > 0) ? mediaUrls[0] : authorAvatar;
+    tokenData.twitterUrl = tweetUrl;
+    // Cache the generated metadata in Supabase
+    try {
+      await supabase.from('processed_tweets').insert({
+        tweet_url: tweetUrl,
+        tweet_text: text,
+        author_name: authorName,
+        author_avatar: authorAvatar,
+        media_urls: mediaUrls,
+        token_name: tokenData.name,
+        token_ticker: tokenData.ticker,
+        token_description: tokenData.description,
+        token_image: tokenData.image,
+        token_website: tweetUrl
+      });
+    } catch (e) {
+      console.warn('Failed to cache token metadata in Supabase:', e.message);
+    }
+    res.json({
+      name: tokenData.name,
+      ticker: tokenData.ticker,
+      description: tokenData.description,
+      image: tokenData.image,
+      twitterUrl: tokenData.twitterUrl
+    });
+  } catch (error) {
+    console.error('Token metadata generation error:', error);
+    res.status(500).json({
+      error: 'Failed to generate token metadata',
+      message: error.message
+    });
+  }
+});
+
+// --- SOL Transfer Endpoint ---
+app.post('/api/transactions/send-sol', async (req, res) => {
+  try {
+    const { fromPublicKey, toPublicKey, amount, secretKey } = req.body;
+
+    if (!fromPublicKey || !toPublicKey || !amount || !secretKey) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    console.log('Attempting to send SOL transaction...');
+
+    const fromKeypair = new PublicKey(fromPublicKey);
+    const toKeypair = new PublicKey(toPublicKey);
+    const amountInLamports = amount * LAMPORTS_PER_SOL;
+
+    // Create transfer instruction
+    const transferInstruction = SystemProgram.transfer({
+      fromPubkey: fromKeypair,
+      toPubkey: toKeypair,
+      lamports: amountInLamports,
+    });
+
+    // Create signer from secret key
+    const secretKeyUint8 = Uint8Array.from(secretKey);
+    const signer = { publicKey: fromKeypair, secretKey: secretKeyUint8 };
+
+    // Send options
+    const sendOptions = {
+      skipPreflight: true,
+      maxRetries: 0
+    };
+
+    console.log('Sending transaction using Helius Smart Transactions...');
+    const signature = await helius.rpc.sendSmartTransaction(
+      [transferInstruction],
+      [signer],
+      [], // No lookup tables needed for simple transfer
+      sendOptions
+    );
+
+    console.log('Transaction sent successfully! Signature:', signature);
+    res.json({ signature });
+  } catch (error) {
+    console.error('Failed to send SOL:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: error.toString()
+    });
+  }
+});
+
+// --- SPL Token Transfer Endpoint ---
+app.post('/api/transactions/send-spl', async (req, res) => {
+  try {
+    const { fromPublicKey, toPublicKey, tokenMint, amount, decimals, secretKey } = req.body;
+
+    if (!fromPublicKey || !toPublicKey || !tokenMint || !amount || !decimals || !secretKey) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    const connection = await getConnection();
+    const fromKeypair = new PublicKey(fromPublicKey);
+    const toKeypair = new PublicKey(toPublicKey);
+    const mintKeypair = new PublicKey(tokenMint);
+    const amountInSmallestUnit = amount * Math.pow(10, decimals);
+
+    // Get or create token accounts
+    const fromTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      { publicKey: fromKeypair, secretKey: Uint8Array.from(secretKey) },
+      mintKeypair,
+      fromKeypair
+    );
+
+    const toTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      { publicKey: fromKeypair, secretKey: Uint8Array.from(secretKey) },
+      mintKeypair,
+      toKeypair
+    );
+
+    // Create transaction
+    const transaction = new Transaction().add(
+      createTransferInstruction(
+        fromTokenAccount.address,
+        toTokenAccount.address,
+        fromKeypair,
+        BigInt(amountInSmallestUnit)
+      )
+    );
+
+    // Get recent blockhash
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    transaction.recentBlockhash = blockhash;
+    transaction.feePayer = fromKeypair;
+
+    // Sign transaction with stored keypair
+    const secretKeyUint8 = Uint8Array.from(secretKey);
+    transaction.sign({ publicKey: fromKeypair, secretKey: secretKeyUint8 });
+
+    // Send and confirm transaction
+    const signature = await connection.sendTransaction(transaction);
+    const confirmation = await connection.confirmTransaction({
+      signature,
+      blockhash,
+      lastValidBlockHeight
+    });
+
+    if (confirmation.value.err) {
+      throw new Error('Transaction failed: ' + JSON.stringify(confirmation.value.err));
+    }
+
+    res.json({ signature });
+  } catch (error) {
+    console.error('Failed to send SPL token:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// --- Token Accounts Endpoint ---
+app.post('/api/rpc/token-accounts', async (req, res) => {
+  try {
+    const { owner } = req.body;
+    console.log('Received token-accounts request for owner:', owner);
+    
+    if (!owner) {
+      console.log('No owner provided in request');
+      return res.status(400).json({ error: 'Owner public key is required' });
+    }
+
+    // Check wallet cache first
+    const cachedTokens = await getCachedWalletTokens(owner);
+    if (cachedTokens) {
+      console.log('Serving wallet tokens from cache');
+      return res.json({ tokens: cachedTokens });
+    }
+
+    console.log('Making RPC call to Helius for token accounts...');
+    const tokenAccountsResponse = await axios.post(
+      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
+      {
+        jsonrpc: "2.0",
+        id: "token-accounts-1",
+        method: "getTokenAccountsByOwner",
+        params: [
+          owner,
+          {
+            programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+          },
+          {
+            encoding: "jsonParsed"
+          }
+        ]
+      }
+    );
+
+    if (!tokenAccountsResponse.data || !tokenAccountsResponse.data.result || !tokenAccountsResponse.data.result.value) {
+      throw new Error('Invalid response from Helius token accounts');
+    }
+
+    // First collect all tokens with positive balances
+    const tokensMap = tokenAccountsResponse.data.result.value.reduce((acc, account) => {
+      try {
+        if (!account.account.data.parsed || !account.account.data.parsed.info) {
+          return acc;
+        }
+
+        const tokenData = account.account.data.parsed.info;
+        const mint = tokenData.mint;
+        const tokenAmount = tokenData.tokenAmount;
+        
+        if (tokenAmount.uiAmount > 0) {
+          acc[mint] = {
+            mint,
+            owner: tokenData.owner,
+            amount: tokenAmount.amount,
+            decimals: tokenAmount.decimals,
+            uiAmount: tokenAmount.uiAmount,
+          };
+        }
+        
+        return acc;
+      } catch (err) {
+        console.warn('Error processing token account:', err);
+        return acc;
+      }
+    }, {});
+
+    // Get mints array for price lookup
+    const mints = Object.keys(tokensMap);
+    
+    if (mints.length === 0) {
+      return res.json({ tokens: {} });
+    }
+
+    // Fetch prices from Moralis
+    console.log('Fetching Moralis prices for tokens:', mints.length);
+    const priceData = await fetchTokenPrices(mints);
+
+    // Merge price data with token data
+    const tokens = {};
+    for (const [mint, tokenData] of Object.entries(tokensMap)) {
+      const price = priceData[mint] || {};
+      // Log the price and uiAmount for debugging
+      console.log(`Token: ${mint}, uiAmount: ${tokenData.uiAmount}, Moralis usdPrice: ${price.usdPrice}`);
+      tokens[mint] = {
+        ...tokenData,
+        name: price.name || tokenData.name || 'Unknown Token',
+        symbol: price.symbol || tokenData.symbol || mint.slice(0, 4),
+        image: price.logo || tokenData.image,
+        usdPrice: price.usdPrice || null, // Use Moralis usdPrice (per token)
+        priceChange24h: price.priceChange24h || null,
+        usdValue: price.usdPrice ? tokenData.uiAmount * price.usdPrice : null
+      };
+      // Log the calculated USD value for debugging
+      console.log(`Token: ${mint}, Calculated USD Value: ${tokens[mint].usdValue}`);
+    }
+
+    // Fetch SOL balance using Helius
+    const solBalanceResponse = await axios.post(
+      `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
+      {
+        jsonrpc: "2.0",
+        id: "sol-balance-1",
+        method: "getBalance",
+        params: [owner]
+      }
+    );
+    const solLamports = solBalanceResponse.data?.result?.value || 0;
+    const solAmount = solLamports / 1e9;
+
+    // Fetch SOL price from Moralis
+    let solPrice = 0;
+    try {
+      const solPriceResp = await axios.get(
+        `https://solana-gateway.moralis.io/token/mainnet/So11111111111111111111111111111111111111112/price`,
+        { headers: { 'X-API-Key': process.env.MORALIS_API_KEY } }
+      );
+      solPrice = solPriceResp.data?.usdPrice || 0;
+    } catch (e) {
+      console.warn('Failed to fetch SOL price from Moralis:', e.message);
+    }
+    const solUsdValue = solAmount * solPrice;
+
+    // Add SOL token
+    const solToken = {
+      mint: 'So11111111111111111111111111111111111111112',
+      owner: owner,
+      amount: solAmount.toString(),
+      decimals: 9,
+      uiAmount: solAmount,
+      symbol: 'SOL',
+      name: 'Solana',
+      image: 'https://turquoise-faithful-whitefish-884.mypinata.cloud/ipfs/bafkreifxayewmnlfvwyydnkkq3f2vgbzk76pcpizfkpj4hlucaczw6kzim',
+      usdPrice: solPrice,
+      usdValue: solUsdValue,
+    };
+    const allTokens = [solToken, ...Object.values(tokens)];
+
+    console.log('Sending response with tokens:', allTokens.length);
+    await setCachedWalletTokens(owner, allTokens);
+    res.json({ tokens: allTokens });
+  } catch (error) {
+    console.error('Token accounts fetch error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch token accounts',
+      details: error.message 
+    });
+  }
+});
+
+// --- Trade Local Endpoint ---
 app.post('/api/trade-local', async (req, res) => {
   try {
     console.log(`Received /api/trade-local request for action: ${req.body.action}`, {
@@ -38,179 +742,85 @@ app.post('/api/trade-local', async (req, res) => {
       priorityFee: req.body.priorityFee,
       computeUnits: req.body.computeUnits,
       pool: req.body.pool,
-      skipInitialBuy: req.body.skipInitialBuy, // Relevant for create
-      tokenMetadata: req.body.tokenMetadata ? { // Relevant for create
-          name: req.body.tokenMetadata.name,
-          symbol: req.body.tokenMetadata.symbol,
-          description_preview: req.body.tokenMetadata.description ? req.body.tokenMetadata.description.substring(0, 50) + "..." : "",
-          image_preview: req.body.tokenMetadata.image ? req.body.tokenMetadata.image.substring(0, 50) + "..." : "",
+      skipInitialBuy: req.body.skipInitialBuy,
+      tokenMetadata: req.body.tokenMetadata ? {
+        name: req.body.tokenMetadata.name,
+        symbol: req.body.tokenMetadata.symbol,
+        description_preview: req.body.tokenMetadata.description ? req.body.tokenMetadata.description.substring(0, 50) + "..." : "",
+        image_preview: req.body.tokenMetadata.image ? req.body.tokenMetadata.image.substring(0, 50) + "..." : "",
       } : undefined
     });
 
-    let requestBodyForPumpPortal;
-    const action = req.body.action;
+    // Validate required fields
+    if (!req.body.publicKey) {
+      throw new Error('Public key is required');
+    }
+    if (!req.body.mint) {
+      throw new Error('Token mint address is required');
+    }
+    if (req.body.amount === undefined || req.body.amount === null) {
+      throw new Error('Amount is required');
+    }
+    if (!['buy', 'sell', 'create'].includes(req.body.action)) {
+      throw new Error('Invalid action. Must be either "buy", "sell", or "create"');
+    }
 
-    if (action === 'create') {
-      console.log('Processing \'create\' action...');
-      // Validate required fields for 'create'
-      if (!req.body.publicKey) throw new Error('Public key is required for create');
-      if (!req.body.tokenMetadata) throw new Error('Token metadata is required for create');
-      if (!req.body.tokenMetadata.name || !req.body.tokenMetadata.symbol) throw new Error('Token name and symbol are required for create');
-      // Ensure image source exists before proceeding to IPFS block
-      if (!req.body.tokenMetadata.image) throw new Error('Image source (URL or data URI) is required in token metadata for create');
-      if (!req.body.mint) throw new Error('Mint address (new token public key) is required for create');
-
-      const imageSource = req.body.tokenMetadata.image; // Now this is safe to access
-      let metadataUri = '';
-
+    // For token creation, first upload metadata to Pump.fun IPFS
+    let metadataUri;
+    if (req.body.action === 'create' && req.body.tokenMetadata) {
       try {
-        console.log('Preparing image and metadata for IPFS upload (action: create)...');
-        
-        let imageBuffer;
-        let imageContentType = 'application/octet-stream';
-        let imageFileName = 'image.png'; // Default with an extension
-  
-        if (imageSource.startsWith('data:')) {
-            const parts = imageSource.split(',');
-            if (parts.length < 2) throw new Error('Invalid data URI format');
-            const metaPart = parts[0];
-            const base64Data = parts[1];
-            const metaMatch = metaPart.match(/^data:(image\/([^;]+));base64$/);
-            if (!metaMatch || !metaMatch[1] || !metaMatch[2]) {
-                 throw new Error('Invalid data URI format or unsupported image type.');
-            }
-            imageContentType = metaMatch[1]; // e.g., image/png
-            const extension = metaMatch[2]; // e.g., png
-            imageBuffer = Buffer.from(base64Data, 'base64');
-            imageFileName = `image.${extension}`;
-            console.log(`Decoded image from data URI. Type: ${imageContentType}, Filename: ${imageFileName}`);
-        } else if (imageSource.startsWith('http:') || imageSource.startsWith('https:')) {
-            console.log(`Fetching image from URL: ${imageSource}`);
-            const imageResponse = await axios.get(imageSource, { responseType: 'arraybuffer', timeout: 20000 });
-            imageBuffer = Buffer.from(imageResponse.data);
-            imageContentType = imageResponse.headers['content-type'] || 'application/octet-stream';
-            
-            try {
-                const parsedUrl = new URL(imageSource);
-                let tempFileName = path.basename(parsedUrl.pathname);
-                // Ensure tempFileName is valid and has an extension, otherwise generate one
-                if (tempFileName && tempFileName !== '/' && tempFileName.includes('.')) {
-                    imageFileName = tempFileName;
-                } else {
-                    const extension = imageContentType.split('/')[1] || 'png'; // Default to png if unknown
-                    imageFileName = `image_from_url.${extension}`;
-                }
-            } catch (e) {
-                const extension = imageContentType.split('/')[1] || 'png';
-                imageFileName = `image_from_url_fallback.${extension}`;
-                console.warn(`Could not parse image URL for filename, using fallback: ${imageFileName}. Error: ${e.message}`);
-            }
-            console.log(`Fetched image from URL. Type: ${imageContentType}, Filename: ${imageFileName}`);
-        } else {
-            throw new Error('Invalid image format. Must be a valid URL (http/https) or a base64 data URI.');
-        }
-
-        if (!imageBuffer || imageBuffer.length === 0) {
-            throw new Error('Failed to load image data or image is empty.');
-        }
-
-        console.log('Uploading metadata and image to Pump.fun IPFS for create...');
         const formData = new FormData();
         formData.append('name', req.body.tokenMetadata.name);
         formData.append('symbol', req.body.tokenMetadata.symbol);
         formData.append('description', req.body.tokenMetadata.description || '');
-        formData.append('twitter', req.body.tokenMetadata.attributes?.find(attr => attr.trait_type === 'Twitter')?.value || '');
-        formData.append('telegram', req.body.tokenMetadata.attributes?.find(attr => attr.trait_type === 'Telegram')?.value || '');
-        formData.append('website', req.body.tokenMetadata.attributes?.find(attr => attr.trait_type === 'Website')?.value || '');
-        formData.append('showName', 'true'); 
-        formData.append('file', imageBuffer, { filename: imageFileName, contentType: imageContentType });
+        formData.append('website', req.body.tokenMetadata.website || '');
+        formData.append('showName', 'true');
         
-        const metadataResponse = await axios.post('https://pump.fun/api/ipfs', formData, {
-          headers: {
-            ...formData.getHeaders(),
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-          },
-          timeout: 60000
-        });
-
-        if (!metadataResponse.data || !metadataResponse.data.metadataUri) {
-          throw new Error(`Invalid response from Pump.fun IPFS: No metadataUri. ${JSON.stringify(metadataResponse.data)}`);
-        }
-        metadataUri = metadataResponse.data.metadataUri;
-        console.log('Metadata uploaded to IPFS for create, URI:', metadataUri);
-      } catch (error) {
-        // Detailed error logging for IPFS upload failure
-        console.error('IPFS processing or upload error (action: create):', error.message);
-        if (error.response) {
-            console.error('IPFS Error Response status (create):', error.response.status);
-            let responseDataError = error.response.data;
-            if (Buffer.isBuffer(responseDataError)) responseDataError = responseDataError.toString('utf-8');
-            else if (typeof responseDataError === 'object') responseDataError = JSON.stringify(responseDataError, null, 2);
-            console.error('IPFS Error Response data (create):', responseDataError);
-        } else if (error.request) {
-            console.error('IPFS Error (create): No response. Request:', error.request);
+        // Use the original image file from the request
+        if (req.body.tokenMetadata.imageFile) {
+          const imageBuffer = Buffer.from(req.body.tokenMetadata.imageFile.split(',')[1], 'base64');
+          const tmpImagePath = path.join(uploadDir, `tmp_${Date.now()}.png`);
+          fs.writeFileSync(tmpImagePath, imageBuffer);
+          formData.append('file', fs.createReadStream(tmpImagePath), 'image.png');
+          
+          const ipfsResp = await axios.post('https://pump.fun/api/ipfs', formData, { headers: formData.getHeaders() });
+          fs.unlinkSync(tmpImagePath);
+          metadataUri = ipfsResp.data.metadataUri;
         } else {
-            console.error('IPFS Error (create): Setup error:', error.stack);
+          throw new Error('Image file is required for token creation');
         }
-        throw new Error(`Failed during IPFS processing/upload for create: ${error.message}`);
+      } catch (error) {
+        console.error('IPFS upload error:', error);
+        throw new Error('Failed to upload metadata to IPFS');
       }
-
-      requestBodyForPumpPortal = {
-        publicKey: req.body.publicKey,
-        action: 'create',
-        tokenMetadata: {
-          name: req.body.tokenMetadata.name,
-          symbol: req.body.tokenMetadata.symbol,
-          uri: metadataUri
-        },
-        mint: req.body.mint,
-        denominatedInSol: String(req.body.denominatedInSol), 
-        amount: Number(req.body.amount), 
-        slippage: req.body.slippage !== undefined ? parseInt(req.body.slippage, 10) : 10,
-        priorityFee: req.body.priorityFee !== undefined ? Number(req.body.priorityFee) : 0.0005, 
-        pool: req.body.pool || 'pump',
-        // Add compute budget related fields specifically for 'create' if needed by pump.fun/pumpportal
-        // These were sent by TokenForm.tsx and might be expected by pumpportal for create
-        skipInitialBuy: req.body.skipInitialBuy !== undefined ? req.body.skipInitialBuy : (Number(req.body.amount) === 0),
-        computeUnits: req.body.computeUnits || 1400000, // from TokenForm
-        maxComputeUnits: req.body.maxComputeUnits || 1400000, // from TokenForm
-        computeBudget: req.body.computeBudget || { units: 1400000, microLamports: 1000000 }, // from TokenForm
-        instructions: req.body.instructions // from TokenForm
-      };
-      console.log('Request body for pumpportal (action: create) prepared.');
-
-    } else if (action === 'buy' || action === 'sell') {
-      console.log(`Processing '${action}' action...`);
-      // Validate required fields for 'buy'/'sell'
-      if (!req.body.publicKey) throw new Error(`Public key is required for ${action}`);
-      if (!req.body.mint) throw new Error(`Mint (token address) is required for ${action}`);
-      if (req.body.amount === undefined || req.body.amount === null) throw new Error(`Amount is required for ${action}`);
-      
-      requestBodyForPumpPortal = {
-        publicKey: req.body.publicKey,
-        action: action, // 'buy' or 'sell'
-        mint: req.body.mint, // Mint of the token to trade
-        denominatedInSol: String(req.body.denominatedInSol), // 'true' for buy, 'false' for sell
-        amount: Number(req.body.amount),
-        slippage: req.body.slippage !== undefined ? parseInt(req.body.slippage, 10) : 10, // Default 10%
-        priorityFee: req.body.priorityFee !== undefined ? Number(req.body.priorityFee) : 0.00005, // Default 0.00005 SOL
-        pool: req.body.pool || 'pump',
-        computeUnits: req.body.computeUnits !== undefined ? Number(req.body.computeUnits) : 600000 // Default compute units for swap, adjust as needed
-        // Note: tokenMetadata, skipInitialBuy, maxComputeUnits, computeBudget, instructions are NOT sent for buy/sell
-      };
-      console.log(`Request body for pumpportal (action: ${action}) prepared.`);
-
-    } else {
-      throw new Error(`Invalid action: ${action}. Must be 'create', 'buy', or 'sell'.`);
     }
 
-    console.log('Sending final request to Pump Portal with params:', {
+    let requestBodyForPumpPortal = {
+      publicKey: req.body.publicKey,
+      action: req.body.action,
+      mint: req.body.mint,
+      denominatedInSol: String(req.body.denominatedInSol),
+      amount: Number(req.body.amount),
+      slippage: req.body.slippage !== undefined ? parseInt(req.body.slippage, 10) : 10,
+      priorityFee: req.body.priorityFee !== undefined ? Number(req.body.priorityFee) : 0.00005,
+      pool: req.body.pool || 'pump',
+      computeUnits: req.body.computeUnits !== undefined ? Number(req.body.computeUnits) : 600000
+    };
+
+    // Add metadataUri for token creation
+    if (req.body.action === 'create' && metadataUri) {
+      requestBodyForPumpPortal.tokenMetadata = {
+        name: req.body.tokenMetadata.name,
+        symbol: req.body.tokenMetadata.symbol,
+        uri: metadataUri
+      };
+    }
+
+    console.log('Sending request to Pump Portal:', {
       action: requestBodyForPumpPortal.action,
-      publicKey: requestBodyForPumpPortal.publicKey ? `${requestBodyForPumpPortal.publicKey.slice(0, 4)}...` : 'N/A',
-      mint: requestBodyForPumpPortal.mint ? `${requestBodyForPumpPortal.mint.slice(0, 4)}...` : 'N/A',
+      publicKey: `${requestBodyForPumpPortal.publicKey.slice(0, 4)}...`,
+      mint: `${requestBodyForPumpPortal.mint.slice(0, 4)}...`,
       amount: requestBodyForPumpPortal.amount,
-      hasTokenMetadata: !!requestBodyForPumpPortal.tokenMetadata,
       computeUnits: requestBodyForPumpPortal.computeUnits
     });
 
@@ -225,120 +835,153 @@ app.post('/api/trade-local', async (req, res) => {
     });
 
     const responseDataBuffer = Buffer.from(pumpPortalResponse.data);
-    let responseLog = `Received response from Pump Portal: Status ${pumpPortalResponse.status}, Data Size: ${responseDataBuffer.length}, Headers: ${JSON.stringify(pumpPortalResponse.headers['content-type'])}`;
-
-    if (pumpPortalResponse.headers['content-type'] && pumpPortalResponse.headers['content-type'].includes('application/json')) {
-        const jsonError = JSON.parse(responseDataBuffer.toString());
-        console.error('Pump Portal returned JSON error:', jsonError);
-        responseLog += `, JSON Error: ${JSON.stringify(jsonError)}`;
-        throw new Error(`Pump Portal Error: ${jsonError.error || jsonError.message || 'Unknown JSON error'}`);
-    } else if (responseDataBuffer.toString('utf8', 0, 100).trim().toLowerCase().startsWith('<!doctype html')) {
-        console.error('Pump Portal returned HTML error page.');
-        responseLog += ', Error: Received HTML response.';
-        throw new Error('Received HTML error response instead of transaction data from Pump Portal.');
+    
+    // Check for JSON error response
+    if (pumpPortalResponse.headers['content-type']?.includes('application/json')) {
+      const jsonError = JSON.parse(responseDataBuffer.toString());
+      console.error('Pump Portal returned JSON error:', jsonError);
+      throw new Error(`Pump Portal Error: ${jsonError.error || jsonError.message || 'Unknown JSON error'}`);
     }
-    console.log(responseLog);
+
+    // Check for HTML error response
+    if (responseDataBuffer.toString('utf8', 0, 100).trim().toLowerCase().startsWith('<!doctype html')) {
+      console.error('Pump Portal returned HTML error page');
+      throw new Error('Received HTML error response from Pump Portal');
+    }
+
+    // Try to update cached balance
+    try {
+      if (['buy', 'sell'].includes(req.body.action) && req.body.publicKey && req.body.mint) {
+        await setCachedTokenBalance(req.body.publicKey, req.body.mint, null);
+      }
+    } catch (e) {
+      console.warn('Failed to update cached token balance:', e.message);
+    }
 
     res.set('Content-Type', 'application/octet-stream');
     res.send(responseDataBuffer);
   } catch (error) {
     console.error('Trade error in /api/trade-local:', error.message);
+    
     let status = 500;
-    let errorResponsePayload = {
-        error: 'Failed to process request',
-        details: error.message,
-        requestBody: {
-            publicKey: req.body.publicKey ? `${req.body.publicKey.slice(0, 4)}...${req.body.publicKey.slice(-4)}` : undefined,
-            action: req.body.action,
-            tokenMetadataName: req.body.tokenMetadata?.name,
-            tokenMetadataSymbol: req.body.tokenMetadata?.symbol,
-        }
+    let errorResponse = {
+      error: 'Failed to process request',
+      details: error.message,
+      requestBody: {
+        publicKey: req.body.publicKey ? `${req.body.publicKey.slice(0, 4)}...${req.body.publicKey.slice(-4)}` : undefined,
+        action: req.body.action,
+        mint: req.body.mint ? `${req.body.mint.slice(0, 4)}...${req.body.mint.slice(-4)}` : undefined,
+        amount: req.body.amount
+      }
     };
 
     if (error.response) {
       status = error.response.status || status;
-      errorResponsePayload.error = `External API Error (${status})`;
-      let externalErrorData = error.response.data;
-      if (Buffer.isBuffer(externalErrorData)) {
-          externalErrorData = externalErrorData.toString('utf-8');
-      }
-      try {
-        const parsedError = JSON.parse(externalErrorData);
-        errorResponsePayload.details = parsedError.error || parsedError.message || externalErrorData;
-      } catch (e) {
-        errorResponsePayload.details = externalErrorData.substring(0, 500);
-      }
-       console.error(`External API Error: Status ${status}, Data:`, errorResponsePayload.details);
-    } else if (error.request) {
-      errorResponsePayload.error = 'No response from external service';
-      console.error('Error: No response received from external service for request:', error.request);
-    } else {
-        console.error('Internal error:', error.stack);
+      errorResponse.error = `Pump Portal API Error: ${error.response.data?.error || error.response.data?.message || 'Unknown error'}`;
+      errorResponse.details = error.response.data;
+    }
+
+    res.status(status).json(errorResponse);
+  }
+});
+
+// Add root route handler
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running' });
+});
+
+// --- Helper Functions ---
+async function getConnection() {
+  // Implementation of getConnection function
+}
+
+const MORALIS_API_KEY = process.env.MORALIS_API_KEY;
+const MORALIS_API_URL = 'https://solana-gateway.moralis.io';
+
+// Update the fetchTokenPrices function to use cache
+async function fetchTokenPrices(tokenAddresses) {
+  if (!tokenAddresses.length) return {};
+
+  try {
+    // Initialize cachedPrices with an empty object
+    let cachedPrices = {};
+    
+    // First check cache
+    try {
+      cachedPrices = await getCachedTokenPrices(tokenAddresses);
+    } catch (cacheError) {
+      console.warn('Error fetching cached prices:', cacheError);
+      cachedPrices = {};
     }
     
-    if (errorResponsePayload.details && typeof errorResponsePayload.details === 'string') {
-        if (errorResponsePayload.details.includes('insufficient lamports') || errorResponsePayload.details.includes('insufficient funds')) {
-          errorResponsePayload.error = 'Insufficient SOL balance.';
-          errorResponsePayload.details = 'Please ensure you have enough SOL to cover transaction and creation fees.';
-        } else if (errorResponsePayload.details.includes('Invalid metadataUri')) {
-            errorResponsePayload.error = 'Metadata URI creation failed or was invalid.';
-            errorResponsePayload.details = 'The IPFS upload to Pump.fun might have failed or returned an invalid URI. Check proxy logs.';
+    const cachedAddresses = Object.keys(cachedPrices);
+    
+    // Find addresses not in cache
+    const uncachedAddresses = tokenAddresses.filter(addr => !cachedAddresses.includes(addr));
+    
+    if (uncachedAddresses.length === 0) {
+      console.log('All token prices found in cache');
+      return cachedPrices;
+    }
+
+    // Fetch only uncached addresses from Moralis
+    console.log(`Fetching ${uncachedAddresses.length} token prices from Moralis`);
+    if (!MORALIS_API_KEY) {
+      console.warn('MORALIS_API_KEY not configured');
+      return cachedPrices;
+    }
+
+    const response = await axios.post(
+      `${MORALIS_API_URL}/token/mainnet/prices`,
+      { addresses: uncachedAddresses },
+      {
+        headers: {
+          'Accept': 'application/json',
+          'X-API-Key': MORALIS_API_KEY
         }
+      }
+    );
+
+    // Log the raw price data from Moralis
+    console.log('Moralis price API response:', JSON.stringify(response.data, null, 2));
+
+    // Transform the response into a map
+    const newPriceData = {};
+    if (response.data && Array.isArray(response.data)) {
+      response.data.forEach(token => {
+        if (token.tokenAddress && token.usdPrice) {
+          newPriceData[token.tokenAddress] = {
+            usdPrice: token.usdPrice,
+            name: token.name,
+            symbol: token.symbol,
+            logo: token.logo,
+            priceChange24h: token.usdPrice24hrPercentChange
+          };
+        }
+      });
     }
 
-    res.status(status).json(errorResponsePayload);
-  }
-});
-
-// Proxy endpoint for token details
-app.get('/api/token/:address', async (req, res) => {
-  try {
-    const { address } = req.params;
-    const response = await axios.get(`https://pumpportal.fun/api/token/${address}`, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
-      }
-    });
-    res.json(response.data);
-  } catch (error) {
-    console.error('Token fetch error:', error.message);
-    res.status(error.response?.status || 500).json({ 
-      error: error.response?.data?.message || error.message 
-    });
-  }
-});
-
-// Proxy endpoint for tokens list
-app.get('/api/tokens', async (req, res) => {
-  try {
-    const response = await axios.get('https://pumpportal.fun/api/tokens', {
-      timeout: 10000,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
-      }
-    });
-    res.json(response.data);
-  } catch (error) {
-    console.error('Tokens list fetch error:', error.message);
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
+    // Cache the new price data
+    try {
+      await cacheTokenPrices(newPriceData);
+    } catch (cacheError) {
+      console.warn('Error caching new prices:', cacheError);
     }
-    res.json([]);
+
+    // Combine cached and new prices
+    return {
+      ...cachedPrices,
+      ...newPriceData
+    };
+  } catch (error) {
+    console.error('Error fetching Moralis token prices:', error);
+    // Return empty object if both cache and API calls fail
+    return {};
   }
-});
+}
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Start the server
 app.listen(PORT, () => {
-  console.log(`Proxy server running on port ${PORT}`);
-}); 
+  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log('Available endpoints:');
+  console.log('- POST /api/rpc/token-accounts');
+});

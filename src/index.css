@@ -22,6 +22,8 @@ html, body, #root {
   min-height: 100vh;
   background: #000;
   scrollbar-width: none; /* Firefox */
+  overflow-x: hidden;
+  width: 100%;
 }
 
 /* Hide scrollbar for Chrome, Edge, and Safari */

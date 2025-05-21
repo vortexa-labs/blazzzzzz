@@ -1,20 +1,39 @@
 {
   "manifest_version": 3,
-  "name": "Blazr - Solana Token Launcher",
+  "name": "Blazr",
   "version": "1.0.0",
-  "description": "Launch and manage Solana tokens with ease",
-  "action": {
-    "default_popup": "index.html",
-    "default_icon": "blazr-icon.svg"
-  },
+  "description": "Launch tokens on Solana",
   "permissions": [
+    "activeTab",
     "storage",
-    "clipboardWrite"
+    "scripting",
+    "sidePanel",
+    "tabs"
   ],
   "host_permissions": [
+    "*://*.twitter.com/*",
+    "*://*.x.com/*",
     "http://localhost:4000/*"
   ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "blazr-icon.svg"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "icons": {
+    "48": "blazr-icon.svg",
     "128": "blazr-icon.svg"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.twitter.com/*", "*://*.x.com/*"],
+      "js": ["contentScript.js"],
+      "css": ["contentScripts/twitter.css"]
+    }
+  ]
 } 

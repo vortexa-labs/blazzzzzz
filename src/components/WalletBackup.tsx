@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Keypair } from '@solana/web3.js';
 import { getWalletFromStorage } from '../utils/wallet';
+import { WalletStorage } from '../services/wallet/types';
+import SuccessModal from './SuccessModal';
 
 interface WalletBackupProps {
   onClose: () => void;
@@ -10,39 +12,45 @@ interface WalletBackupProps {
 const WalletBackup: React.FC<WalletBackupProps> = ({ onClose, onRestore }) => {
   const [activeTab, setActiveTab] = useState<'backup' | 'restore'>('backup');
   const [privateKey, setPrivateKey] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState('');
+  const [backupData, setBackupData] = useState<string>('');
+
+  const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
+    return btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+  };
+
+  const base64ToUint8Array = (base64: string): Uint8Array => {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  };
 
   const handleBackup = async () => {
     try {
       const storage = await getWalletFromStorage();
-      if (!storage.blazr_wallet) {
+      if (!storage?.blazr_wallet) {
         throw new Error('No wallet found');
       }
 
       const keypair = Keypair.fromSecretKey(Uint8Array.from(storage.blazr_wallet.secretKey));
-      const privateKeyBase58 = Buffer.from(keypair.secretKey).toString('base64');
+      const privateKeyBase58 = uint8ArrayToBase64(keypair.secretKey);
 
       // Create backup file
-      const backupData = {
+      const backupContent = {
         privateKey: privateKeyBase58,
-        publicKey: keypair.publicKey.toBase58(),
+        publicKey: storage.blazr_wallet.publicKey,
         timestamp: new Date().toISOString()
       };
 
-      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `blazr-wallet-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      setSuccess('Wallet backup downloaded successfully');
-    } catch (err: any) {
-      setError(err.message || 'Failed to backup wallet');
+      setBackupData(JSON.stringify(backupContent, null, 2));
+      setError(null);
+    } catch (err) {
+      setError('Failed to backup wallet');
+      console.error(err);
     }
   };
 
@@ -58,7 +66,7 @@ const WalletBackup: React.FC<WalletBackupProps> = ({ onClose, onRestore }) => {
       // Try to parse as base64
       let secretKey: Uint8Array;
       try {
-        secretKey = Uint8Array.from(Buffer.from(privateKey, 'base64'));
+        secretKey = base64ToUint8Array(privateKey);
       } catch {
         throw new Error('Invalid private key format');
       }
@@ -195,8 +203,20 @@ const WalletBackup: React.FC<WalletBackupProps> = ({ onClose, onRestore }) => {
         )}
 
         {success && (
-          <div className="mt-4 bg-green-900/20 border border-green-500/50 rounded-lg p-4 text-sm text-green-200">
-            {success}
+          <SuccessModal
+            title={success.includes('restored') ? 'Wallet Restored!' : 'Wallet Backup Saved!'}
+            message={success}
+            buttons={[
+              { label: 'Done', onClick: () => setSuccess('') },
+            ]}
+            onClose={() => setSuccess('')}
+          />
+        )}
+
+        {backupData && (
+          <div className="mt-4 bg-zinc-800 rounded-lg p-4 text-sm text-gray-400">
+            <h3 className="font-bold mb-2">Backup Data:</h3>
+            <pre>{backupData}</pre>
           </div>
         )}
       </div>
