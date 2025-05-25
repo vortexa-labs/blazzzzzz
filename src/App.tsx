@@ -8,13 +8,13 @@ import { resizeImageToSquare, validateImage } from './utils/imageProcessing';
 import { 
   View, 
   TokenMetadataCache, 
-  TokenCacheData, 
   TransactionConfirmation,
   HeliusTokenMetadata,
   SolanaToken,
   SolanaTokenList,
   WalletStorage
 } from './types';
+import { TokenCacheData } from './types/index';
 import SwapModal from './components/SwapModal';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import BottomNav from './components/BottomNav';
