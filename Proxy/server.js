@@ -1038,8 +1038,12 @@ async function fetchTokenPrices(tokenAddresses) {
   }
 }
 
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log('Available endpoints:');
-  console.log('- POST /api/rpc/token-accounts');
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+    console.log('Available endpoints:');
+    console.log('- POST /api/rpc/token-accounts');
+  });
+}
+
+module.exports = app;
