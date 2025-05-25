@@ -1,0 +1,16 @@
+[data-testid="tweet"] {
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 12px;
+}
+
+[data-testid="tweet"]:hover {
+  border-color: #FF3131;
+  transform: scale(1.01);
+}
+
+[data-testid="tweet"].loading {
+  opacity: 0.7;
+  pointer-events: none;
+} 
