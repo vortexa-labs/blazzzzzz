@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Copy, ChevronDown, Loader2, ExternalLink } from 'lucide-react';
 import { useWallet } from '../services/wallet/hooks';
-import { sendSol, sendSplToken } from '../services/transactions/api';
 import SuccessModal from '../components/SuccessModal';
+import { Connection, SystemProgram, Transaction, PublicKey, LAMPORTS_PER_SOL, sendAndConfirmTransaction } from '@solana/web3.js';
+import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+
+const SOLANA_RPC = 'https://greatest-lingering-forest.solana-mainnet.quiknode.pro/7d9cdaae49e7f160cc664e2070e978a345de47d0/';
 
 interface Token {
   symbol: string;
@@ -90,29 +93,52 @@ const Send: React.FC = () => {
 
   const handleSend = async () => {
     if (!keypair || !validateAddress(recipient) || !amount || parseFloat(amount) <= 0) return;
-
     setIsLoading(true);
     setError(null);
-
+    const connection = new Connection(SOLANA_RPC, 'confirmed');
     try {
       let signature: string;
-
       if (selectedToken?.symbol === 'SOL') {
-        signature = await sendSol(
-          keypair.publicKey.toBase58(),
-          recipient,
-          parseFloat(amount)
+        // Send SOL
+        const tx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: keypair.publicKey,
+            toPubkey: new PublicKey(recipient),
+            lamports: Math.round(parseFloat(amount) * LAMPORTS_PER_SOL),
+          })
         );
+        signature = await sendAndConfirmTransaction(connection, tx, [keypair]);
       } else {
-        signature = await sendSplToken(
-          keypair.publicKey.toBase58(),
-          recipient,
-          selectedToken?.address || '',
-          parseFloat(amount),
-          selectedToken?.decimals || 0
+        // Send SPL Token
+        const mint = new PublicKey(selectedToken!.mint);
+        const fromTokenAccount = await getAssociatedTokenAddress(mint, keypair.publicKey);
+        const toTokenAccount = await getAssociatedTokenAddress(mint, new PublicKey(recipient));
+        const toTokenAccountInfo = await connection.getAccountInfo(toTokenAccount);
+        const instructions = [];
+        if (!toTokenAccountInfo) {
+          // Create associated token account for recipient
+          instructions.push(
+            createAssociatedTokenAccountInstruction(
+              keypair.publicKey,
+              toTokenAccount,
+              new PublicKey(recipient),
+              mint
+            )
+          );
+        }
+        instructions.push(
+          createTransferInstruction(
+            fromTokenAccount,
+            toTokenAccount,
+            keypair.publicKey,
+            Math.round(parseFloat(amount) * Math.pow(10, selectedToken!.decimals)),
+            [],
+            TOKEN_PROGRAM_ID
+          )
         );
+        const tx = new Transaction().add(...instructions);
+        signature = await sendAndConfirmTransaction(connection, tx, [keypair]);
       }
-
       setTransactionSignature(signature);
       setShowSuccess(true);
       await refreshBalance();
@@ -172,7 +198,6 @@ const Send: React.FC = () => {
             </div>
             <ChevronDown className="w-5 h-5 text-gray-400" />
           </button>
-
           {showTokenSelector && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-[#181818] rounded-2xl overflow-hidden z-10 shadow-lg">
               {tokens.map((token) => (
@@ -279,13 +304,8 @@ const Send: React.FC = () => {
       {/* Success Modal */}
       {showSuccess && (
         <SuccessModal
-          title="Transfer Complete!"
-          message={`You've successfully sent '${selectedToken?.symbol}' from your wallet.`}
-          details={[
-            { label: 'Amount', value: `${amount} ${selectedToken?.symbol || ''}` },
-            { label: 'Recipient', value: recipient, copy: true },
-            transactionSignature ? { label: 'Tx Signature', value: transactionSignature, copy: true } : undefined,
-          ].filter(Boolean) as { label: string; value: string; copy?: boolean }[]}
+          title="Sent"
+          message={`${amount} ${selectedToken?.symbol || ''} Was successfully sent to ${recipient.slice(0, 6)}....${recipient.slice(-5)}`}
           links={transactionSignature ? [
             { label: 'View on Solscan', url: `https://solscan.io/tx/${transactionSignature}` },
           ] : []}
@@ -302,6 +322,9 @@ const Send: React.FC = () => {
           ]}
           onClose={() => setShowSuccess(false)}
         />
+      )}
+      {error && (
+        <div className="px-4 text-red-500 text-center mb-4">{error}</div>
       )}
     </div>
   );

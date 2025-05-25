@@ -15,25 +15,8 @@ const Popup: React.FC = () => {
   }, []);
 
   const handlePinToSidebar = () => {
-    try {
-      if (chrome?.sidePanel?.setOptions && chrome?.sidePanel?.open) {
-        chrome.sidePanel.setOptions({
-          path: 'sidepanel.html',
-          enabled: true
-        }, () => {
-          if (chrome.runtime.lastError) {
-            console.error('Error setting sidepanel options:', chrome.runtime.lastError);
-            return;
-          }
-          // @ts-ignore - Chrome API types are not fully up to date
-          chrome.sidePanel.open();
-        });
-      } else {
-        console.warn('Side panel API not available in this context.');
-      }
-    } catch (error) {
-      console.error('Failed to open side panel:', error);
-    }
+    chrome.runtime.sendMessage({ action: "openSidePanel" });
+    window.close();
   };
 
   const handleCreateTokenFromTweet = () => {

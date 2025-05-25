@@ -74,7 +74,8 @@ module.exports = {
         { from: 'public/manifest.json', to: 'manifest.json' },
         { from: 'public/blazr-icon.svg', to: 'blazr-icon.svg' },
         { from: 'public/blazrcreate.svg', to: 'blazrcreate.svg' },
-        { from: 'src/contentScripts/twitter.css', to: 'contentScripts/twitter.css' }
+        { from: 'src/contentScripts/twitter.css', to: 'contentScripts/twitter.css' },
+        { from: 'icons', to: 'icons' }
       ],
     }),
     new webpack.ProvidePlugin({

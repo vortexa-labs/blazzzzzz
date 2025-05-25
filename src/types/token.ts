@@ -5,5 +5,6 @@ export interface TokenFormData {
   image: string;
   website?: string;
   twitter?: string;
+  twitterUrl?: string;
   telegram?: string;
 } 

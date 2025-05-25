@@ -78,7 +78,10 @@ const Portfolio: React.FC = () => {
   }, [keypair]);
 
   // Calculate total USD value of all tokens (including SOL)
-  const totalUsdValue = tokenBalances.reduce((sum, t) => sum + (t.usdValue || 0), 0);
+  const totalUsdValue = Array.isArray(tokenBalances) ? tokenBalances.reduce((sum, t) => sum + (t.usdValue || 0), 0) : 0;
+  // Find SOL price from tokenBalances
+  const solPrice = Array.isArray(tokenBalances) ? tokenBalances.find(t => t.symbol === 'SOL')?.usdPrice || 0 : 0;
+  const totalSolEquivalent = solPrice > 0 ? totalUsdValue / solPrice : 0;
 
   if (isLoading) {
     return (
@@ -102,7 +105,7 @@ const Portfolio: React.FC = () => {
           ${totalUsdValue.toFixed(2)}
         </div>
         <div className="text-sm text-gray-400 mt-1">
-          {balance?.sol.toFixed(4) || '0.0000'} SOL
+          {totalSolEquivalent.toFixed(4)} SOL
         </div>
       </div>
 

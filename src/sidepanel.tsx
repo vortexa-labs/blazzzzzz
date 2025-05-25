@@ -10,6 +10,8 @@ import Wallet from './pages/Wallet';
 import Send from './pages/Send';
 import BottomNav from './components/BottomNav';
 import { createRoot } from 'react-dom/client';
+import Settings from './pages/Settings';
+import { SessionProvider } from './context/SessionContext';
 
 // @ts-ignore
 // eslint-disable-next-line no-var
@@ -120,6 +122,7 @@ const Sidepanel: React.FC = () => {
             <Route path="/swap" element={<Swap />} />
             <Route path="/wallet" element={<Wallet />} />
             <Route path="/send" element={<Send />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Home />} />
           </Routes>
         </div>
@@ -132,7 +135,11 @@ const Sidepanel: React.FC = () => {
 // Mount the Sidepanel component to the #root div
 const root = document.getElementById('root');
 if (root) {
-  createRoot(root).render(<Sidepanel />);
+  createRoot(root).render(
+    <SessionProvider>
+      <Sidepanel />
+    </SessionProvider>
+  );
 }
 
 export default Sidepanel; 

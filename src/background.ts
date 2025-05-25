@@ -4,6 +4,7 @@ import { API_ENDPOINTS } from './config/api';
 interface Message {
   type: string;
   data: any; // Accept raw tweet data
+  action?: string; // Allow optional action property for sidepanel open
 }
 
 // Set sidepanel options once on install
@@ -74,7 +75,13 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
     chrome.storage.local.set({ sidepanelState: { loading: true, navigate: false } });
     
     makeApiRequest('/api/generate-token-metadata', 'POST', message.data)
-      .then(async (tokenData: Partial<TokenFormData>) => {
+      .then(async (response: any) => {
+        // Map the response to use twitterUrl as the twitter field
+        const tokenData: Partial<TokenFormData> = {
+          ...response,
+          twitter: response.twitterUrl || response.twitter || ''  // Use twitterUrl as the twitter field
+        };
+        
         chrome.storage.local.set({ tokenData }, async () => {
           await openSidePanel();
           // Set navigation state in storage
@@ -93,5 +100,23 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         sendResponse({ success: false, error: err.message });
       });
     return true;
+  }
+
+  if (message.action === "openSidePanel") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.sidePanel.open({ tabId: tabs[0].id }, () => {
+          if (chrome.runtime.lastError) {
+            console.error("Failed to open side panel:", chrome.runtime.lastError.message);
+          } else {
+            console.log("Side panel opened");
+            // Try to close the popup window if sender is a popup
+            if (sender && sender.tab && sender.tab.windowId) {
+              chrome.windows.remove(sender.tab.windowId);
+            }
+          }
+        });
+      }
+    });
   }
 }); 

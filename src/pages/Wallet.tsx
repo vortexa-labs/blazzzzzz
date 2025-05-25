@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { getWalletFromStorage } from '../utils/wallet';
 import { getWalletBalance, createWallet, importWallet } from '../services/wallet/api';
 import { useWallet } from '../services/wallet/hooks';
+import { useSession } from '../context/SessionContext';
 import SuccessModal from '../components/SuccessModal';
 import bs58 from 'bs58';
 
@@ -42,6 +43,7 @@ const Wallet: React.FC = () => {
     error: walletError,
     refreshBalance
   } = useWallet();
+  const { checkSession } = useSession();
 
   const [isCopied, setIsCopied] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -55,6 +57,7 @@ const Wallet: React.FC = () => {
   const [privateKeyRevealed, setPrivateKeyRevealed] = useState(false);
   const [privateKeyCopied, setPrivateKeyCopied] = useState(false);
   const [base58PrivateKey, setBase58PrivateKey] = useState('');
+  const [importSuccessMessage, setImportSuccessMessage] = useState('');
 
   useEffect(() => {
     if (isInitialized) {
@@ -92,7 +95,9 @@ const Wallet: React.FC = () => {
     fetchTokens();
   }, [keypair]);
 
-  const totalUsdValue = tokenBalances.reduce((sum, t) => sum + (t.usdValue || 0), 0);
+  const totalUsdValue = Array.isArray(tokenBalances) ? tokenBalances.reduce((sum, t) => sum + (t.usdValue || 0), 0) : 0;
+  const solPrice = Array.isArray(tokenBalances) ? tokenBalances.find(t => t.symbol === 'SOL')?.usdPrice || 0 : 0;
+  const totalSolEquivalent = solPrice > 0 ? totalUsdValue / solPrice : 0;
 
   const handleImport = async () => {
     try {
@@ -106,9 +111,16 @@ const Wallet: React.FC = () => {
       console.log('Attempting to import with cleaned key:', cleanedKey);
       
       await importWallet(cleanedKey);
+      
+      // Refresh session to ensure it's still valid
+      await checkSession();
+      
       setShowImportModal(false);
       setImportPrivateKey('');
       await refreshBalance();
+      
+      // Show success message with session info
+      setImportSuccessMessage('Wallet imported successfully! Your session remains active.');
     } catch (err: any) {
       console.error('Import error:', err);
       setError(err.message || 'Failed to import wallet');
@@ -153,7 +165,7 @@ const Wallet: React.FC = () => {
     setBase58PrivateKey('');
   };
 
-  if (isLoading) {
+  if (isLoadingTokens) {
     return (
       <div className="flex items-center justify-center min-h-[500px]">
         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-[#FF3131]"></div>
@@ -203,7 +215,7 @@ const Wallet: React.FC = () => {
           <div className="text-gray-400">Balance</div>
         </div>
         <div className="text-3xl font-bold">{formatCurrency(totalUsdValue)}</div>
-        <div className="text-sm text-gray-400 mt-1">{(balance?.sol || 0).toFixed(4)} SOL</div>
+        <div className="text-sm text-gray-400 mt-1">{totalSolEquivalent.toFixed(4)} SOL</div>
       </div>
 
       <div className="w-full space-y-4">
@@ -256,6 +268,9 @@ const Wallet: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-[#181818] rounded-xl p-6 w-full max-w-md">
             <h3 className="text-xl font-semibold text-white mb-4">Import Wallet</h3>
+            <div className="text-gray-300 mb-4">
+              Enter your private key (base58 format). Your current password and session will remain active.
+            </div>
             <textarea
               value={importPrivateKey}
               onChange={(e) => setImportPrivateKey(e.target.value)}

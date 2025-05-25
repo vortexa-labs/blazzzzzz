@@ -24,6 +24,11 @@ import Portfolio from './pages/Portfolio';
 import Swap from './pages/Swap';
 import Wallet from './pages/Wallet';
 import Send from './pages/Send';
+import Settings from './pages/Settings';
+import CreatePassword from './pages/CreatePassword';
+import Unlock from './pages/Unlock';
+import { useSession } from './context/SessionContext';
+import SessionActivityTracker from './context/SessionActivityTracker';
 
 // @ts-ignore
 // eslint-disable-next-line no-var
@@ -213,19 +218,38 @@ const BalanceDisplay: React.FC<{ sol: number | null, solUsdRate: number }> = ({ 
 };
 
 const App: React.FC = () => {
+  const { sessionLocked, isFirstTime } = useSession();
   return (
     <Router>
+      <SessionActivityTracker />
       <div className="bg-[#0f0f0f] min-h-screen flex flex-col font-sans text-white" style={{width: 400, minHeight: 600}}>
         <div className="flex-1 pb-16">
           <Routes>
-            <Route path="/" element={<Navigate to="/home" />} />
-            <Route path="/home" element={<Home />} />
-            <Route path="/launch" element={<LaunchToken />} />
-            <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/swap" element={<Swap />} />
-            <Route path="/wallet" element={<Wallet />} />
-            <Route path="/send" element={<Send />} />
-            <Route path="*" element={<Navigate to="/home" replace />} />
+            {isFirstTime ? (
+              <>
+                <Route path="/create-password" element={<CreatePassword />} />
+                <Route path="*" element={<Navigate to="/create-password" replace />} />
+              </>
+            ) : sessionLocked ? (
+              <>
+                <Route path="/unlock" element={<Unlock />} />
+                <Route path="*" element={<Navigate to="/unlock" replace />} />
+              </>
+            ) : (
+              <>
+                <Route path="/" element={<Navigate to="/home" />} />
+                <Route path="/create-password" element={<Navigate to="/home" replace />} />
+                <Route path="/unlock" element={<Navigate to="/home" replace />} />
+                <Route path="/home" element={<Home />} />
+                <Route path="/launch" element={<LaunchToken />} />
+                <Route path="/portfolio" element={<Portfolio />} />
+                <Route path="/swap" element={<Swap />} />
+                <Route path="/wallet" element={<Wallet />} />
+                <Route path="/send" element={<Send />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/home" replace />} />
+              </>
+            )}
           </Routes>
         </div>
         <BottomNav />

@@ -262,7 +262,7 @@ app.post('/api/generate-token-data', async (req, res) => {
         ticker: existingTweet.token_ticker,
         description: existingTweet.token_description,
         image: existingTweet.token_image,
-        website: existingTweet.token_website,
+        website: existingTweet.token_twitter,
         pumpPortalTx: existingTweet.pump_portal_tx || null
       });
     }
@@ -298,7 +298,7 @@ app.post('/api/generate-token-data', async (req, res) => {
       formData.append('name', tokenData.name);
       formData.append('symbol', tokenData.ticker);
       formData.append('description', tokenData.description);
-      formData.append('website', tweetUrl);
+      formData.append('twitter', tweetUrl);
       formData.append('showName', 'true');
 
       // Write base64 image to file
@@ -358,7 +358,7 @@ app.post('/api/generate-token-data', async (req, res) => {
         token_ticker: tokenData.ticker,
         token_description: tokenData.description,
         token_image: imageFile,
-        token_website: tweetUrl,
+        token_twitter: tweetUrl,
         pump_portal_tx: tradeResp.data
       });
     } catch (error) {
@@ -401,7 +401,7 @@ app.post('/api/generate-token-metadata', async (req, res) => {
         ticker: existingTweet.token_ticker,
         description: existingTweet.token_description,
         image: existingTweet.token_image,
-        twitterUrl: existingTweet.token_website || tweetUrl
+        twitterUrl: existingTweet.token_twitter || tweetUrl
       });
     }
     // Generate meme token data with OpenAI
@@ -437,7 +437,7 @@ app.post('/api/generate-token-metadata', async (req, res) => {
         token_ticker: tokenData.ticker,
         token_description: tokenData.description,
         token_image: tokenData.image,
-        token_website: tweetUrl
+        token_twitter: tweetUrl
       });
     } catch (e) {
       console.warn('Failed to cache token metadata in Supabase:', e.message);
@@ -646,7 +646,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
       }
     }, {});
 
-    // Get mints array for price lookup
+    // Get mints array for price lookup and metadata
     const mints = Object.keys(tokensMap);
     
     if (mints.length === 0) {
@@ -656,24 +656,49 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     // Fetch prices from Moralis
     console.log('Fetching Moralis prices for tokens:', mints.length);
     const priceData = await fetchTokenPrices(mints);
+    console.log('Moralis priceData:', JSON.stringify(priceData, null, 2));
 
-    // Merge price data with token data
+    // Fetch metadata from Helius
+    console.log('Fetching Helius metadata for tokens:', mints.length);
+    const heliusMetaResp = await axios.post(
+      `https://api.helius.xyz/v0/tokens/metadata?api-key=${process.env.HELIUS_API_KEY}`,
+      { mintAccounts: mints }
+    );
+    const heliusMetaArr = heliusMetaResp.data;
+    const heliusMetaMap = {};
+    heliusMetaArr.forEach(meta => { heliusMetaMap[meta.mint] = meta; });
+    console.log('HeliusMetaMap:', JSON.stringify(heliusMetaMap, null, 2));
+
+    // Helper to resolve IPFS URLs
+    function resolveIpfsUrl(url) {
+      if (!url) return '';
+      if (url.startsWith('ipfs://')) {
+        return url.replace('ipfs://', 'https://ipfs.io/ipfs/');
+      }
+      return url;
+    }
+
+    // Merge metadata and price data
     const tokens = {};
     for (const [mint, tokenData] of Object.entries(tokensMap)) {
       const price = priceData[mint] || {};
-      // Log the price and uiAmount for debugging
-      console.log(`Token: ${mint}, uiAmount: ${tokenData.uiAmount}, Moralis usdPrice: ${price.usdPrice}`);
+      const meta = heliusMetaMap[mint] || {};
+      console.log('Mint:', mint, 'Meta:', JSON.stringify(meta, null, 2));
+      // Prefer offChainData.image, fallback to onChainData.data.uri
+      let image = meta.offChainData?.image || meta.legacyMetadata?.logoURI || '';
+      if (!image && meta.onChainData?.data?.uri) {
+        image = meta.onChainData.data.uri;
+      }
+      image = resolveIpfsUrl(image);
       tokens[mint] = {
         ...tokenData,
-        name: price.name || tokenData.name || 'Unknown Token',
-        symbol: price.symbol || tokenData.symbol || mint.slice(0, 4),
-        image: price.logo || tokenData.image,
+        name: meta.offChainData?.name || meta.legacyMetadata?.name || 'Unknown Token',
+        symbol: meta.offChainData?.symbol || meta.legacyMetadata?.symbol || mint.slice(0, 4),
+        image,
         usdPrice: price.usdPrice || null, // Use Moralis usdPrice (per token)
-        priceChange24h: price.priceChange24h || null,
+        priceChange24h: price.priceChange24h || price.usdPrice24hrPercentChange || null,
         usdValue: price.usdPrice ? tokenData.uiAmount * price.usdPrice : null
       };
-      // Log the calculated USD value for debugging
-      console.log(`Token: ${mint}, Calculated USD Value: ${tokens[mint].usdValue}`);
     }
 
     // Fetch SOL balance using Helius
@@ -702,7 +727,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     }
     const solUsdValue = solAmount * solPrice;
 
-    // Add SOL token
+    // Add SOL token (keep hardcoded image)
     const solToken = {
       mint: 'So11111111111111111111111111111111111111112',
       owner: owner,
@@ -718,6 +743,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     const allTokens = [solToken, ...Object.values(tokens)];
 
     console.log('Sending response with tokens:', allTokens.length);
+    console.log('All tokens response:', JSON.stringify(allTokens, null, 2));
     await setCachedWalletTokens(owner, allTokens);
     res.json({ tokens: allTokens });
   } catch (error) {
@@ -773,7 +799,7 @@ app.post('/api/trade-local', async (req, res) => {
         formData.append('name', req.body.tokenMetadata.name);
         formData.append('symbol', req.body.tokenMetadata.symbol);
         formData.append('description', req.body.tokenMetadata.description || '');
-        formData.append('website', req.body.tokenMetadata.website || '');
+        formData.append('twitter', req.body.tokenMetadata.website || '');
         formData.append('showName', 'true');
         
         // Use the original image file from the request
@@ -858,6 +884,24 @@ app.post('/api/trade-local', async (req, res) => {
       console.warn('Failed to update cached token balance:', e.message);
     }
 
+    // Log created token to Supabase
+    if (req.body.action === 'create') {
+      try {
+        await supabase.from('created_tokens').insert([{
+          user_public_key: req.body.publicKey,
+          token_name: req.body.tokenMetadata?.name,
+          token_symbol: req.body.tokenMetadata?.symbol,
+          mint_address: req.body.mint,
+          created_at: new Date().toISOString(),
+          tx_signature: null, // You can update this if you have the signature
+          metadata: req.body.tokenMetadata
+        }]);
+        console.log('Logged created token to Supabase');
+      } catch (logErr) {
+        console.error('Failed to log created token:', logErr.message);
+      }
+    }
+
     res.set('Content-Type', 'application/octet-stream');
     res.send(responseDataBuffer);
   } catch (error) {
@@ -882,6 +926,20 @@ app.post('/api/trade-local', async (req, res) => {
     }
 
     res.status(status).json(errorResponse);
+  }
+});
+
+// --- Endpoint to fetch all created tokens ---
+app.get('/api/created-tokens', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('created_tokens')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ tokens: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

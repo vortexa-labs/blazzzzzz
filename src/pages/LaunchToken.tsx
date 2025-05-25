@@ -79,12 +79,18 @@ const LaunchToken: React.FC = () => {
   useEffect(() => {
     chrome.storage?.local?.get(['tokenData'], (result) => {
       if (result.tokenData) {
-        // Convert all values to strings for the form
         const stringifiedData = Object.fromEntries(
           Object.entries(result.tokenData).map(([key, value]) => [key, String(value || '')])
         ) as FormState;
-        setForm(prev => ({ ...prev, ...stringifiedData }));
-        // If we got an image URL, set the preview
+        
+        // Ensure both twitter and twitterUrl are set
+        setForm(prev => ({
+          ...prev,
+          ...stringifiedData,
+          twitter: stringifiedData.twitterUrl || stringifiedData.twitter || '',
+          twitterUrl: stringifiedData.twitterUrl || ''
+        }));
+        
         if (result.tokenData.image) {
           setImagePreview(result.tokenData.image);
         }
@@ -329,25 +335,17 @@ const LaunchToken: React.FC = () => {
       <h2 className="text-2xl font-bold text-white mb-4">Launch Token</h2>
       {showSuccessModal && successDetails && (
         <SuccessModal
-          title="Token Launched!"
-          message={`'${successDetails.name}' has been successfully deployed to Solana.`}
+          title="Success!"
+          message={`"${successDetails.name}" was created`}
           details={[
-            { label: 'Contract', value: successDetails.contract, copy: true },
-            { label: 'Tx Signature', value: successDetails.signature, copy: true },
+            { label: 'CA', value: successDetails.contract }
           ]}
           links={[
-            { label: 'View on Pump.fun', url: `https://pump.fun/coin/${successDetails.contract}` },
-            { label: 'View on Solscan', url: `https://solscan.io/tx/${successDetails.signature}` },
+            { label: 'View on Solscan', url: `https://solscan.io/address/${successDetails.contract}` },
+            { label: 'View on Pumpfun', url: `https://pump.fun/coin/${successDetails.contract}` },
           ]}
           buttons={[
-            {
-              label: 'Copy All',
-              onClick: () => {
-                const details = `Token Name: ${successDetails.name}\nContract: ${successDetails.contract}\nTx: ${successDetails.signature}\nPump.fun: https://pump.fun/coin/${successDetails.contract}\nSolscan: https://solscan.io/tx/${successDetails.signature}`;
-                navigator.clipboard.writeText(details);
-              },
-            },
-            { label: 'Launch Another', onClick: handleReset },
+            { label: 'Launch Another Token', onClick: handleReset },
             { label: 'Done', onClick: () => setShowSuccessModal(false) },
           ]}
           onClose={() => setShowSuccessModal(false)}
