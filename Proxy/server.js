@@ -17,9 +17,23 @@ const { derivePath } = require('ed25519-hd-key');
 // Load environment variables from the correct path
 require('dotenv').config({ path: '../.env' });
 
-// Debug logging
-console.log('Environment check:');
-console.log('- HELIUS_API_KEY:', process.env.HELIUS_API_KEY ? 'Defined' : 'Not defined');
+const logger = {
+  log: (...args) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(...args);
+    }
+  },
+  error: (...args) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.error(...args);
+    }
+  },
+  warn: (...args) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(...args);
+    }
+  }
+};
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -43,7 +57,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Add request logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  logger.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
   next();
 });
 
@@ -66,7 +80,7 @@ app.use('/assets', express.static(path.join(__dirname, '../src/assets')));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Server error:', err);
+  logger.error('Server error:', err);
   res.status(500).json({
     error: 'Internal server error',
     message: err.message,
@@ -148,7 +162,7 @@ async function getCachedTokenPrices(tokenAddresses) {
       .gte('last_updated', new Date(Date.now() - PRICE_CACHE_TTL_MS).toISOString());
 
     if (error) {
-      console.error('Error fetching cached prices:', error);
+      logger.error('Error fetching cached prices:', error);
       return {};
     }
 
@@ -165,7 +179,7 @@ async function getCachedTokenPrices(tokenAddresses) {
 
     return priceMap;
   } catch (e) {
-    console.error('Error in getCachedTokenPrices:', e);
+    logger.error('Error in getCachedTokenPrices:', e);
     return {};
   }
 }
@@ -192,11 +206,11 @@ async function cacheTokenPrices(priceData) {
         });
 
       if (error) {
-        console.error('Error caching token prices:', error);
+        logger.error('Error caching token prices:', error);
       }
     }
   } catch (e) {
-    console.error('Error in cacheTokenPrices:', e);
+    logger.error('Error in cacheTokenPrices:', e);
   }
 }
 
@@ -235,7 +249,7 @@ async function setCachedWalletTokens(owner, tokens) {
 app.post('/api/generate-token-data', async (req, res) => {
   try {
     const { text, mediaUrls, tweetUrl, authorName, authorAvatar, imageFile } = req.body;
-    console.log('Received token generation request:', { tweetUrl, authorName });
+    logger.log('Received token generation request:', { tweetUrl, authorName });
 
     if (!text || !tweetUrl || !authorName) {
       return res.status(400).json({
@@ -252,7 +266,7 @@ app.post('/api/generate-token-data', async (req, res) => {
       .single();
 
     if (queryError && queryError.code !== 'PGRST116') {
-      console.error('Database query error:', queryError);
+      logger.error('Database query error:', queryError);
       throw new Error('Failed to check existing tweet');
     }
 
@@ -282,7 +296,7 @@ app.post('/api/generate-token-data', async (req, res) => {
       const response = completion.choices[0].message.content;
       tokenData = JSON.parse(response);
     } catch (error) {
-      console.error('OpenAI API error:', error);
+      logger.error('OpenAI API error:', error);
       throw new Error('Failed to generate token data');
     }
 
@@ -311,7 +325,7 @@ app.post('/api/generate-token-data', async (req, res) => {
       fs.unlinkSync(tmpImagePath);
       metadataUri = ipfsResp.data.metadataUri;
     } catch (error) {
-      console.error('IPFS upload error:', error);
+      logger.error('IPFS upload error:', error);
       throw new Error('Failed to upload metadata to IPFS');
     }
 
@@ -342,7 +356,7 @@ app.post('/api/generate-token-data', async (req, res) => {
         { headers: { 'Content-Type': 'application/json' } }
       );
     } catch (error) {
-      console.error('Pump Portal API error:', error);
+      logger.error('Pump Portal API error:', error);
       throw new Error('Failed to create token on Pump Portal');
     }
 
@@ -362,7 +376,7 @@ app.post('/api/generate-token-data', async (req, res) => {
         pump_portal_tx: tradeResp.data
       });
     } catch (error) {
-      console.error('Database insert error:', error);
+      logger.error('Database insert error:', error);
       throw new Error('Failed to store token data in database');
     }
 
@@ -371,7 +385,7 @@ app.post('/api/generate-token-data', async (req, res) => {
       pumpPortalTx: tradeResp.data
     });
   } catch (error) {
-    console.error('Token generation error:', error);
+    logger.error('Token generation error:', error);
     res.status(500).json({
       error: 'Failed to generate token',
       message: error.message
@@ -419,7 +433,7 @@ app.post('/api/generate-token-metadata', async (req, res) => {
       const response = completion.choices[0].message.content;
       tokenData = JSON.parse(response);
     } catch (error) {
-      console.error('OpenAI API error:', error);
+      logger.error('OpenAI API error:', error);
       throw new Error('Failed to generate token data');
     }
     // Pick best image: first media or author avatar
@@ -440,7 +454,7 @@ app.post('/api/generate-token-metadata', async (req, res) => {
         token_twitter: tweetUrl
       });
     } catch (e) {
-      console.warn('Failed to cache token metadata in Supabase:', e.message);
+      logger.warn('Failed to cache token metadata in Supabase:', e.message);
     }
     res.json({
       name: tokenData.name,
@@ -450,7 +464,7 @@ app.post('/api/generate-token-metadata', async (req, res) => {
       twitterUrl: tokenData.twitterUrl
     });
   } catch (error) {
-    console.error('Token metadata generation error:', error);
+    logger.error('Token metadata generation error:', error);
     res.status(500).json({
       error: 'Failed to generate token metadata',
       message: error.message
@@ -467,7 +481,7 @@ app.post('/api/transactions/send-sol', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    console.log('Attempting to send SOL transaction...');
+    logger.log('Attempting to send SOL transaction...');
 
     const fromKeypair = new PublicKey(fromPublicKey);
     const toKeypair = new PublicKey(toPublicKey);
@@ -490,7 +504,7 @@ app.post('/api/transactions/send-sol', async (req, res) => {
       maxRetries: 0
     };
 
-    console.log('Sending transaction using Helius Smart Transactions...');
+    logger.log('Sending transaction using Helius Smart Transactions...');
     const signature = await helius.rpc.sendSmartTransaction(
       [transferInstruction],
       [signer],
@@ -498,10 +512,10 @@ app.post('/api/transactions/send-sol', async (req, res) => {
       sendOptions
     );
 
-    console.log('Transaction sent successfully! Signature:', signature);
+    logger.log('Transaction sent successfully! Signature:', signature);
     res.json({ signature });
   } catch (error) {
-    console.error('Failed to send SOL:', error);
+    logger.error('Failed to send SOL:', error);
     res.status(500).json({ 
       error: error.message,
       details: error.toString()
@@ -572,7 +586,7 @@ app.post('/api/transactions/send-spl', async (req, res) => {
 
     res.json({ signature });
   } catch (error) {
-    console.error('Failed to send SPL token:', error);
+    logger.error('Failed to send SPL token:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -581,21 +595,21 @@ app.post('/api/transactions/send-spl', async (req, res) => {
 app.post('/api/rpc/token-accounts', async (req, res) => {
   try {
     const { owner } = req.body;
-    console.log('Received token-accounts request for owner:', owner);
+    logger.log('Received token-accounts request for owner:', owner);
     
     if (!owner) {
-      console.log('No owner provided in request');
+      logger.log('No owner provided in request');
       return res.status(400).json({ error: 'Owner public key is required' });
     }
 
     // Check wallet cache first
     const cachedTokens = await getCachedWalletTokens(owner);
     if (cachedTokens) {
-      console.log('Serving wallet tokens from cache');
+      logger.log('Serving wallet tokens from cache');
       return res.json({ tokens: cachedTokens });
     }
 
-    console.log('Making RPC call to Helius for token accounts...');
+    logger.log('Making RPC call to Helius for token accounts...');
     const tokenAccountsResponse = await axios.post(
       `https://mainnet.helius-rpc.com/?api-key=${process.env.HELIUS_API_KEY}`,
       {
@@ -641,7 +655,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
         
         return acc;
       } catch (err) {
-        console.warn('Error processing token account:', err);
+        logger.warn('Error processing token account:', err);
         return acc;
       }
     }, {});
@@ -654,12 +668,12 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     }
 
     // Fetch prices from Moralis
-    console.log('Fetching Moralis prices for tokens:', mints.length);
+    logger.log('Fetching Moralis prices for tokens:', mints.length);
     const priceData = await fetchTokenPrices(mints);
-    console.log('Moralis priceData:', JSON.stringify(priceData, null, 2));
+    logger.log('Moralis priceData:', JSON.stringify(priceData, null, 2));
 
     // Fetch metadata from Helius
-    console.log('Fetching Helius metadata for tokens:', mints.length);
+    logger.log('Fetching Helius metadata for tokens:', mints.length);
     const heliusMetaResp = await axios.post(
       `https://api.helius.xyz/v0/tokens/metadata?api-key=${process.env.HELIUS_API_KEY}`,
       { mintAccounts: mints }
@@ -667,7 +681,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     const heliusMetaArr = heliusMetaResp.data;
     const heliusMetaMap = {};
     heliusMetaArr.forEach(meta => { heliusMetaMap[meta.mint] = meta; });
-    console.log('HeliusMetaMap:', JSON.stringify(heliusMetaMap, null, 2));
+    logger.log('HeliusMetaMap:', JSON.stringify(heliusMetaMap, null, 2));
 
     // Helper to resolve IPFS URLs
     function resolveIpfsUrl(url) {
@@ -683,7 +697,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     for (const [mint, tokenData] of Object.entries(tokensMap)) {
       const price = priceData[mint] || {};
       const meta = heliusMetaMap[mint] || {};
-      console.log('Mint:', mint, 'Meta:', JSON.stringify(meta, null, 2));
+      logger.log('Mint:', mint, 'Meta:', JSON.stringify(meta, null, 2));
       // Prefer offChainData.image, fallback to onChainData.data.uri
       let image = meta.offChainData?.image || meta.legacyMetadata?.logoURI || '';
       if (!image && meta.onChainData?.data?.uri) {
@@ -723,7 +737,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
       );
       solPrice = solPriceResp.data?.usdPrice || 0;
     } catch (e) {
-      console.warn('Failed to fetch SOL price from Moralis:', e.message);
+      logger.warn('Failed to fetch SOL price from Moralis:', e.message);
     }
     const solUsdValue = solAmount * solPrice;
 
@@ -742,12 +756,12 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
     };
     const allTokens = [solToken, ...Object.values(tokens)];
 
-    console.log('Sending response with tokens:', allTokens.length);
-    console.log('All tokens response:', JSON.stringify(allTokens, null, 2));
+    logger.log('Sending response with tokens:', allTokens.length);
+    logger.log('All tokens response:', JSON.stringify(allTokens, null, 2));
     await setCachedWalletTokens(owner, allTokens);
     res.json({ tokens: allTokens });
   } catch (error) {
-    console.error('Token accounts fetch error:', error);
+    logger.error('Token accounts fetch error:', error);
     res.status(500).json({ 
       error: 'Failed to fetch token accounts',
       details: error.message 
@@ -758,7 +772,7 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
 // --- Trade Local Endpoint ---
 app.post('/api/trade-local', async (req, res) => {
   try {
-    console.log(`Received /api/trade-local request for action: ${req.body.action}`, {
+    logger.log(`Received /api/trade-local request for action: ${req.body.action}`, {
       action: req.body.action,
       publicKey: req.body.publicKey ? `${req.body.publicKey.slice(0, 4)}...${req.body.publicKey.slice(-4)}` : undefined,
       mint: req.body.mint ? `${req.body.mint.slice(0, 4)}...${req.body.mint.slice(-4)}` : undefined,
@@ -816,7 +830,7 @@ app.post('/api/trade-local', async (req, res) => {
           throw new Error('Image file is required for token creation');
         }
       } catch (error) {
-        console.error('IPFS upload error:', error);
+        logger.error('IPFS upload error:', error);
         throw new Error('Failed to upload metadata to IPFS');
       }
     }
@@ -825,10 +839,10 @@ app.post('/api/trade-local', async (req, res) => {
       publicKey: req.body.publicKey,
       action: req.body.action,
       mint: req.body.mint,
-      denominatedInSol: String(req.body.denominatedInSol),
+      denominatedInSol: req.body.denominatedInSol === 'true' || req.body.denominatedInSol === true,
       amount: Number(req.body.amount),
       slippage: req.body.slippage !== undefined ? parseInt(req.body.slippage, 10) : 10,
-      priorityFee: req.body.priorityFee !== undefined ? Number(req.body.priorityFee) : 0.00005,
+      priorityFee: req.body.priorityFee !== undefined ? Number(req.body.priorityFee) : 0.00001,
       pool: req.body.pool || 'pump',
       computeUnits: req.body.computeUnits !== undefined ? Number(req.body.computeUnits) : 600000
     };
@@ -842,11 +856,16 @@ app.post('/api/trade-local', async (req, res) => {
       };
     }
 
-    console.log('Sending request to Pump Portal:', {
+    // Log the final payload with all fields
+    logger.log('Final request payload for Pump Portal:', {
       action: requestBodyForPumpPortal.action,
-      publicKey: `${requestBodyForPumpPortal.publicKey.slice(0, 4)}...`,
-      mint: `${requestBodyForPumpPortal.mint.slice(0, 4)}...`,
+      publicKey: `${requestBodyForPumpPortal.publicKey.slice(0, 4)}...${requestBodyForPumpPortal.publicKey.slice(-4)}`,
+      mint: `${requestBodyForPumpPortal.mint.slice(0, 4)}...${requestBodyForPumpPortal.mint.slice(-4)}`,
       amount: requestBodyForPumpPortal.amount,
+      denominatedInSol: requestBodyForPumpPortal.denominatedInSol,
+      slippage: requestBodyForPumpPortal.slippage,
+      priorityFee: requestBodyForPumpPortal.priorityFee,
+      pool: requestBodyForPumpPortal.pool,
       computeUnits: requestBodyForPumpPortal.computeUnits
     });
 
@@ -865,13 +884,13 @@ app.post('/api/trade-local', async (req, res) => {
     // Check for JSON error response
     if (pumpPortalResponse.headers['content-type']?.includes('application/json')) {
       const jsonError = JSON.parse(responseDataBuffer.toString());
-      console.error('Pump Portal returned JSON error:', jsonError);
+      logger.error('Pump Portal returned JSON error:', jsonError);
       throw new Error(`Pump Portal Error: ${jsonError.error || jsonError.message || 'Unknown JSON error'}`);
     }
 
     // Check for HTML error response
     if (responseDataBuffer.toString('utf8', 0, 100).trim().toLowerCase().startsWith('<!doctype html')) {
-      console.error('Pump Portal returned HTML error page');
+      logger.error('Pump Portal returned HTML error page');
       throw new Error('Received HTML error response from Pump Portal');
     }
 
@@ -881,7 +900,7 @@ app.post('/api/trade-local', async (req, res) => {
         await setCachedTokenBalance(req.body.publicKey, req.body.mint, null);
       }
     } catch (e) {
-      console.warn('Failed to update cached token balance:', e.message);
+      logger.warn('Failed to update cached token balance:', e.message);
     }
 
     // Log created token to Supabase
@@ -896,16 +915,16 @@ app.post('/api/trade-local', async (req, res) => {
           tx_signature: null, // You can update this if you have the signature
           metadata: req.body.tokenMetadata
         }]);
-        console.log('Logged created token to Supabase');
+        logger.log('Logged created token to Supabase');
       } catch (logErr) {
-        console.error('Failed to log created token:', logErr.message);
+        logger.error('Failed to log created token:', logErr.message);
       }
     }
 
     res.set('Content-Type', 'application/octet-stream');
     res.send(responseDataBuffer);
   } catch (error) {
-    console.error('Trade error in /api/trade-local:', error.message);
+    logger.error('Trade error in /api/trade-local:', error.message);
     
     let status = 500;
     let errorResponse = {
@@ -968,7 +987,7 @@ async function fetchTokenPrices(tokenAddresses) {
     try {
       cachedPrices = await getCachedTokenPrices(tokenAddresses);
     } catch (cacheError) {
-      console.warn('Error fetching cached prices:', cacheError);
+      logger.warn('Error fetching cached prices:', cacheError);
       cachedPrices = {};
     }
     
@@ -978,14 +997,14 @@ async function fetchTokenPrices(tokenAddresses) {
     const uncachedAddresses = tokenAddresses.filter(addr => !cachedAddresses.includes(addr));
     
     if (uncachedAddresses.length === 0) {
-      console.log('All token prices found in cache');
+      logger.log('All token prices found in cache');
       return cachedPrices;
     }
 
     // Fetch only uncached addresses from Moralis
-    console.log(`Fetching ${uncachedAddresses.length} token prices from Moralis`);
+    logger.log(`Fetching ${uncachedAddresses.length} token prices from Moralis`);
     if (!MORALIS_API_KEY) {
-      console.warn('MORALIS_API_KEY not configured');
+      logger.warn('MORALIS_API_KEY not configured');
       return cachedPrices;
     }
 
@@ -1001,7 +1020,7 @@ async function fetchTokenPrices(tokenAddresses) {
     );
 
     // Log the raw price data from Moralis
-    console.log('Moralis price API response:', JSON.stringify(response.data, null, 2));
+    logger.log('Moralis price API response:', JSON.stringify(response.data, null, 2));
 
     // Transform the response into a map
     const newPriceData = {};
@@ -1023,7 +1042,7 @@ async function fetchTokenPrices(tokenAddresses) {
     try {
       await cacheTokenPrices(newPriceData);
     } catch (cacheError) {
-      console.warn('Error caching new prices:', cacheError);
+      logger.warn('Error caching new prices:', cacheError);
     }
 
     // Combine cached and new prices
@@ -1032,17 +1051,51 @@ async function fetchTokenPrices(tokenAddresses) {
       ...newPriceData
     };
   } catch (error) {
-    console.error('Error fetching Moralis token prices:', error);
+    logger.error('Error fetching Moralis token prices:', error);
     // Return empty object if both cache and API calls fail
     return {};
   }
 }
 
+// Move the /api/quote endpoint here so it is registered before server start/export
+app.post('/api/quote', async (req, res) => {
+  console.log('QUOTE HANDLER REACHED');
+  try {
+    const { fromToken, toToken, amount } = req.body;
+    logger.log('[QUOTE] Request:', { fromToken, toToken, amount });
+    if (!fromToken || !toToken || !amount) {
+      logger.error('[QUOTE] Missing parameters:', { fromToken, toToken, amount });
+      return res.status(400).json({ error: 'Missing parameters' });
+    }
+
+    // Fetch USD prices for both tokens using your existing fetchTokenPrices function
+    const prices = await fetchTokenPrices([fromToken, toToken]);
+    logger.log('[QUOTE] Prices fetched:', prices);
+    const fromPrice = prices[fromToken]?.usdPrice;
+    const toPrice = prices[toToken]?.usdPrice;
+    logger.log('[QUOTE] fromPrice:', fromPrice, 'toPrice:', toPrice);
+
+    if (!fromPrice || !toPrice) {
+      logger.error('[QUOTE] Could not fetch token prices:', { fromToken, toToken, fromPrice, toPrice });
+      return res.status(400).json({ error: 'Could not fetch token prices' });
+    }
+
+    // Calculate output amount (estimate)
+    const outputAmount = (Number(amount) * fromPrice) / toPrice;
+    logger.log('[QUOTE] Calculated outputAmount:', outputAmount);
+
+    res.json({ outputAmount });
+  } catch (error) {
+    logger.error('Quote error:', error);
+    res.status(500).json({ error: 'Failed to get swap quote' });
+  }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-    console.log('Available endpoints:');
-    console.log('- POST /api/rpc/token-accounts');
+    logger.log(`Server is running on http://localhost:${PORT}`);
+    logger.log('Available endpoints:');
+    logger.log('- POST /api/rpc/token-accounts');
   });
 }
 

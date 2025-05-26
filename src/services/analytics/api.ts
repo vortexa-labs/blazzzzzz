@@ -10,7 +10,7 @@ import {
 } from './types';
 import { API_ENDPOINTS } from '../../config/api';
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'https://blazzzzzz-111.onrender.com/api';
 
 export async function trackEvent(event: AnalyticsEvent): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/analytics/events`, {

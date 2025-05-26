@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getAllStoredWallets, removeWalletFromStorage } from '../utils/wallet';
+import { logger } from '../utils/logger';
 
 interface StoredWallet {
   publicKey: string;
@@ -20,8 +21,9 @@ const WalletList: React.FC<WalletListProps> = ({ onSelectWallet }) => {
       setIsLoading(true);
       const storedWallets = await getAllStoredWallets();
       setWallets(storedWallets);
+      logger.log('Wallets loaded successfully');
     } catch (error) {
-      console.error('Error loading wallets:', error);
+      logger.error('Error loading wallets:', error);
     } finally {
       setIsLoading(false);
     }
@@ -35,8 +37,9 @@ const WalletList: React.FC<WalletListProps> = ({ onSelectWallet }) => {
     try {
       await removeWalletFromStorage(walletName);
       await loadWallets();
+      logger.log('Wallet removed successfully');
     } catch (error) {
-      console.error('Error removing wallet:', error);
+      logger.error('Error removing wallet:', error);
     }
   };
 

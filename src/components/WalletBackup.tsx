@@ -3,6 +3,7 @@ import { Keypair } from '@solana/web3.js';
 import { getWalletFromStorage } from '../utils/wallet';
 import { WalletStorage } from '../services/wallet/types';
 import SuccessModal from './SuccessModal';
+import { logger } from '../utils/logger';
 
 interface WalletBackupProps {
   onClose: () => void;
@@ -50,7 +51,7 @@ const WalletBackup: React.FC<WalletBackupProps> = ({ onClose, onRestore }) => {
       setError(null);
     } catch (err) {
       setError('Failed to backup wallet');
-      console.error(err);
+      logger.error('Wallet backup component error:', err);
     }
   };
 
@@ -105,6 +106,8 @@ const WalletBackup: React.FC<WalletBackupProps> = ({ onClose, onRestore }) => {
     };
     reader.readAsText(file);
   };
+
+  logger.log('Wallet backup component initialized');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur">

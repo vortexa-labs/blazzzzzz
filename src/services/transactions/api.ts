@@ -18,7 +18,7 @@ import { API_ENDPOINTS } from '../../config/api';
 // Make Buffer available globally
 (window as any).Buffer = Buffer;
 
-const API_BASE_URL = 'http://localhost:4000/api';
+const API_BASE_URL = 'https://blazzzzzz-111.onrender.com/api';
 
 // Add missing API functions
 export async function getTransactionList(params: TransactionSearchParams): Promise<TransactionListResponse> {

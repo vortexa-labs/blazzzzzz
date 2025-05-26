@@ -8,6 +8,7 @@ import { getWalletFromStorage } from '../utils/wallet';
 import { Loader2 } from 'lucide-react';
 import { getSwapQuote } from '../services/swap/api';
 import SuccessModal from '../components/SuccessModal';
+import { logger } from '../utils/logger';
 
 interface Token {
   mint: string;
@@ -98,7 +99,7 @@ const Swap: React.FC = () => {
     fetchTokens();
   }, []);
 
-  // Fetch quote for To amount
+  // Restore swap quote fetching
   useEffect(() => {
     const fetchQuote = async () => {
       if (!fromToken || !toToken || !amount || isNaN(Number(amount)) || Number(amount) <= 0) {
@@ -106,7 +107,9 @@ const Swap: React.FC = () => {
         return;
       }
       try {
+        console.log('Fetching quote with:', { fromToken, toToken, amount });
         const quote = await getSwapQuote(fromToken.mint, toToken.mint, Number(amount));
+        console.log('Quote response:', quote);
         if (quote?.outputAmount) {
           // Format the output amount to 6 decimal places
           const formattedAmount = (Number(quote.outputAmount) / 1e9).toFixed(6);
@@ -115,12 +118,10 @@ const Swap: React.FC = () => {
           setToAmount('');
         }
       } catch (e) {
-        console.error('Error fetching quote:', e);
+        console.error('Failed to get token price:', e);
         setToAmount('');
       }
     };
-
-    // Add debounce to prevent too many API calls
     const timeoutId = setTimeout(fetchQuote, 500);
     return () => clearTimeout(timeoutId);
   }, [fromToken, toToken, amount]);
@@ -140,17 +141,17 @@ const Swap: React.FC = () => {
   }, [fromToken, tokens]);
 
   const handleMax = () => {
-    console.log('MAX button clicked');
-    console.log('handleMax clicked, fromToken:', fromToken);
+    logger.log('MAX button clicked');
+    logger.log('handleMax clicked, fromToken:', fromToken);
     if (!fromToken) return;
     let maxAmount = fromToken.uiAmount;
-    console.log('fromToken.uiAmount:', fromToken.uiAmount);
+    logger.log('fromToken.uiAmount:', fromToken.uiAmount);
     // If the token is SOL, leave some for transaction fees
     if (fromToken.symbol === 'SOL') {
       maxAmount = Math.max(0, fromToken.uiAmount - 0.01); // Leave 0.01 SOL for fees
     }
     setAmount(maxAmount.toFixed(6));
-    console.log('Amount set to:', maxAmount.toFixed(6));
+    logger.log('Amount set to:', maxAmount.toFixed(6));
   };
 
   // Filter To tokens based on From selection
@@ -184,17 +185,40 @@ const Swap: React.FC = () => {
     try {
       const wallet = await getWalletFromStorage();
       if (!wallet?.blazr_wallet) throw new Error('Wallet not found');
+
+      // --- Determine action and mint for swap ---
+      let action: 'buy' | 'sell';
+      let mint: string;
+      let denominatedInSol: 'true' | 'false';
+
+      if (fromToken.symbol === 'SOL' && toToken.symbol !== 'SOL') {
+        // SOL → Token
+        action = 'buy';
+        mint = toToken.mint;
+        denominatedInSol = 'true';  // When buying with SOL, denominatedInSol should be true
+      } else if (fromToken.symbol !== 'SOL' && toToken.symbol === 'SOL') {
+        // Token → SOL
+        action = 'sell';
+        mint = fromToken.mint;
+        denominatedInSol = 'false';  // When selling to SOL, denominatedInSol should be false
+      } else {
+        // Other cases (e.g., token to token) - handle as needed or show error
+        setSwapError('Only SOL ↔ Token swaps are supported.');
+        return;
+      }
+
       const request = {
         publicKey: wallet.blazr_wallet.publicKey,
-        action: 'sell' as 'sell',
-        mint: fromToken.mint,
-        denominatedInSol: 'false' as 'false' | 'true',
+        action,
+        mint,
+        denominatedInSol,
         amount: Number(amount),
         slippage: 10,
         priorityFee: 0.00005,
         pool: 'pump',
         computeUnits: 600000,
       };
+
       const result = await performSwap(request);
       if (result && result.status === 'success') {
         setSwapSuccess(true);

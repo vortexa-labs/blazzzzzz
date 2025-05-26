@@ -13,7 +13,7 @@
   "host_permissions": [
     "*://*.twitter.com/*",
     "*://*.x.com/*",
-    "http://localhost:4000/*"
+    "https://blazzzzzz-111.onrender.com/*"
   ],
   "action": {
     "default_popup": "popup.html",

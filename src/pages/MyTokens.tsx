@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
 import { getWalletFromStorage } from '../utils/wallet';
+import { logger } from '../utils/logger';
 
 interface Token {
   address: string;
@@ -20,15 +21,16 @@ const MyTokens: React.FC = () => {
       setIsLoading(true);
       const wallet = await getWalletFromStorage();
       if (!wallet?.blazr_wallet) {
-        console.error('No wallet found');
+        logger.error('No wallet found');
         return;
       }
 
-      const response = await fetch('http://localhost:4000/api/tokens');
+      const response = await fetch('https://blazzzzzz-111.onrender.com/api/tokens');
       const data = await response.json();
       setTokens(data);
+      logger.log('My tokens data loaded');
     } catch (error) {
-      console.error('Error fetching tokens:', error);
+      logger.error('Failed to load my tokens data:', error);
     } finally {
       setIsLoading(false);
     }

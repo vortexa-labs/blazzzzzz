@@ -9,6 +9,7 @@ import {
 } from './api';
 import { WalletState, WalletBalance } from './types';
 import { getWalletFromStorage } from '../../utils/wallet';
+import { logger } from '../../utils/logger';
 
 // Cache duration in milliseconds (1 minute)
 const CACHE_DURATION = 60 * 1000;
@@ -50,7 +51,7 @@ export function useWallet() {
         };
         setState(prev => ({ ...prev, balance: freshBalance }));
       } catch (error) {
-        console.error('Background refresh failed:', error);
+        logger.error('Background refresh failed:', error);
       }
     }, CACHE_DURATION);
 
@@ -112,7 +113,7 @@ export function useWallet() {
           };
           setState(prev => ({ ...prev, balance: freshBalance }));
         }).catch(error => {
-          console.error('Background refresh failed:', error);
+          logger.error('Background refresh failed:', error);
           cached.isRefreshing = false;
         });
       }

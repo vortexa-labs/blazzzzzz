@@ -5,6 +5,7 @@ import { useWallet } from '../services/wallet/hooks';
 import SuccessModal from '../components/SuccessModal';
 import { Connection, SystemProgram, Transaction, PublicKey, LAMPORTS_PER_SOL, sendAndConfirmTransaction } from '@solana/web3.js';
 import { getAssociatedTokenAddress, createAssociatedTokenAccountInstruction, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { logger } from '../utils/logger';
 
 const SOLANA_RPC = 'https://greatest-lingering-forest.solana-mainnet.quiknode.pro/7d9cdaae49e7f160cc664e2070e978a345de47d0/';
 
@@ -144,9 +145,10 @@ const Send: React.FC = () => {
       await refreshBalance();
     } catch (err: any) {
       setError(err.message || 'Failed to send transaction');
-      console.error('Transaction failed:', err);
+      logger.error('Transaction failed:', err);
     } finally {
       setIsLoading(false);
+      logger.log('Send transaction completed');
     }
   };
 

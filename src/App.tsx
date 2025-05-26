@@ -29,6 +29,7 @@ import CreatePassword from './pages/CreatePassword';
 import Unlock from './pages/Unlock';
 import { useSession } from './context/SessionContext';
 import SessionActivityTracker from './context/SessionActivityTracker';
+import { logger } from './utils/logger';
 
 // @ts-ignore
 // eslint-disable-next-line no-var
@@ -91,22 +92,22 @@ async function fetchTokenAccountsFromHeliusRpc(ownerPublicKey: string): Promise<
     });
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Helius RPC getTokenAccountsByOwner error:', response.status, errorText);
+      logger.error('Helius RPC getTokenAccountsByOwner error:', response.status, errorText);
       throw new Error(`Helius RPC error: ${response.status} - ${errorText}`);
     }
     const data = await response.json();
     if (data.error) {
-      console.error('Helius RPC getTokenAccountsByOwner data error:', data.error);
+      logger.error('Helius RPC getTokenAccountsByOwner data error:', data.error);
       throw new Error(`Helius RPC data error: ${data.error.message || JSON.stringify(data.error)}`);
     }
     if (data.result && Array.isArray(data.result.value)) {
       return data.result.value;
     } else {
-      console.warn('Helius RPC getTokenAccountsByOwner response did not have expected structure:', data);
+      logger.warn('Helius RPC getTokenAccountsByOwner response did not have expected structure:', data);
       return [];
     }
   } catch (e) {
-    console.error('Failed to fetch token accounts from Helius RPC:', e);
+    logger.error('Failed to fetch token accounts from Helius RPC:', e);
     throw e;
   }
 }
@@ -122,7 +123,7 @@ async function fetchTokenMetadataFromHelius(mintAccounts: string[]): Promise<Rec
     });
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('Helius API error:', response.status, errorData);
+      logger.error('Helius API error:', response.status, errorData);
       return {};
     }
     const data: HeliusTokenMetadata[] = await response.json();
@@ -138,7 +139,7 @@ async function fetchTokenMetadataFromHelius(mintAccounts: string[]): Promise<Rec
     });
     return metadataMap;
   } catch (e) {
-    console.error('Error fetching metadata from Helius:', e);
+    logger.error('Error fetching metadata from Helius:', e);
     return {};
   }
 }
@@ -155,22 +156,22 @@ async function myTokensView_fetchTokenAccounts(ownerPublicKey: string): Promise<
     });
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('(MyTokensView_HeliusRPC) getTokenAccountsByOwner error:', response.status, errorText);
+      logger.error('(MyTokensView_HeliusRPC) getTokenAccountsByOwner error:', response.status, errorText);
       throw new Error(`MyTokensView Helius RPC error: ${response.status} - ${errorText}`);
     }
     const data = await response.json();
     if (data.error) {
-      console.error('(MyTokensView_HeliusRPC) getTokenAccountsByOwner data error:', data.error);
+      logger.error('(MyTokensView_HeliusRPC) getTokenAccountsByOwner data error:', data.error);
       throw new Error(`MyTokensView Helius RPC data error: ${data.error.message || JSON.stringify(data.error)}`);
     }
     if (data.result && Array.isArray(data.result.value)) {
       return data.result.value;
     } else {
-      console.warn('(MyTokensView_HeliusRPC) getTokenAccountsByOwner response did not have expected structure:', data);
+      logger.warn('(MyTokensView_HeliusRPC) getTokenAccountsByOwner response did not have expected structure:', data);
       return [];
     }
   } catch (e) {
-    console.error('(MyTokensView_HeliusRPC) Failed to fetch token accounts:', e);
+    logger.error('(MyTokensView_HeliusRPC) Failed to fetch token accounts:', e);
     throw e;
   }
 }
@@ -186,7 +187,7 @@ async function myTokensView_fetchMetadata(mintAccounts: string[]): Promise<Recor
     });
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('(MyTokensView_HeliusMeta) API error:', response.status, errorData);
+      logger.error('(MyTokensView_HeliusMeta) API error:', response.status, errorData);
       return {};
     }
     const data: HeliusTokenMetadata[] = await response.json();
@@ -201,7 +202,7 @@ async function myTokensView_fetchMetadata(mintAccounts: string[]): Promise<Recor
     });
     return metadataMap;
   } catch (e) {
-    console.error('(MyTokensView_HeliusMeta) Error fetching metadata from Helius:', e);
+    logger.error('(MyTokensView_HeliusMeta) Error fetching metadata from Helius:', e);
     return {};
   }
 }
@@ -349,7 +350,7 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
       // Show success message
       setSuccessMessage('Image ready for upload!');
     } catch (err: any) {
-      console.error('Image processing error:', err);
+      logger.error('Image processing error:', err);
       setUploadError(err.message || 'Failed to process image');
     } finally {
       setIsUploading(false);
@@ -369,7 +370,7 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
 
   // Modal handlers
   const handleLaunchClick = (e: React.FormEvent) => {
-    console.log('Launch button clicked');
+    logger.log('Launch button clicked');
     e.preventDefault();
     // Validation
     const newErrors: { [key: string]: string } = {};
@@ -380,36 +381,36 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
     if (!imageFile) {
       newErrors.image = '* Token image is required (upload an image file)';
     }
-    console.log('Validation errors:', newErrors);
+    logger.log('Validation errors:', newErrors);
     setErrors(newErrors);
     if (Object.keys(newErrors).length === 0) {
-      console.log('Validation passed, showing modal');
+      logger.log('Validation passed, showing modal');
       setShowModal(true);
     }
   };
 
   // Launch token handler
   const launchToken = async (buyAmount: string) => {
-    console.log('Starting token launch with amount:', buyAmount);
+    logger.log('Starting token launch with amount:', buyAmount);
     setLaunching(true);
     setLaunchError(null);
     setLaunchSuccess(null);
     try {
       // Load wallet from storage
-      console.log('Loading wallet from storage');
+      logger.log('Loading wallet from storage');
       let kp: web3Js.Keypair | null = null;
       const storage = await getWalletFromStorage();
-      console.log('Wallet storage:', storage);
+      logger.log('Wallet storage:', storage);
       if (storage.blazr_wallet) {
         kp = web3Js.Keypair.fromSecretKey(Uint8Array.from(storage.blazr_wallet.secretKey));
-        console.log('Wallet loaded successfully');
+        logger.log('Wallet loaded successfully');
       } else {
-        console.error('Wallet not found in storage');
+        logger.error('Wallet not found in storage');
         throw new Error('Wallet not found');
       }
       // Generate a random keypair for the mint
       const mintKeypair = web3Js.Keypair.generate();
-      console.log('Generated mint keypair');
+      logger.log('Generated mint keypair');
 
       // 1. Upload image to Pinata
       let imageBase64 = '';
@@ -448,8 +449,8 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
       ];
 
       // 2. Request the transaction from Pump Portal
-      console.log('Requesting transaction from Pump Portal');
-      const tradeRes = await fetch('http://localhost:4000/api/trade-local', {
+      logger.log('Requesting transaction from Pump Portal');
+      const tradeRes = await fetch('https://blazzzzzz-111.onrender.com/api/trade-local', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -489,40 +490,40 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
         } catch (e) {
           // If JSON parsing fails, use the raw text.
           // This handles cases where the server returns HTML or plain text error.
-          console.error('Pump Portal API raw error response:', errorText);
+          logger.error('Pump Portal API raw error response:', errorText);
           throw new Error(`Pump Portal API error: ${tradeRes.status} ${tradeRes.statusText}. Response: ${errorText.substring(0, 200)}...`);
         }
-        console.error('Pump Portal API error:', errorData);
+        logger.error('Pump Portal API error:', errorData);
         throw new Error(errorData.details || errorData.error || errorData.message || 'Pump Portal API error');
       }
 
-      console.log('Received transaction from Pump Portal');
+      logger.log('Received transaction from Pump Portal');
       const txBuffer = await tradeRes.arrayBuffer();
       const tx = web3Js.VersionedTransaction.deserialize(new Uint8Array(txBuffer));
 
       // 3. Fetch a fresh blockhash and set it on the transaction
-      console.log('Fetching fresh blockhash');
+      logger.log('Fetching fresh blockhash');
       const connection = new web3Js.Connection('https://greatest-lingering-forest.solana-mainnet.quiknode.pro/7d9cdaae49e7f160cc664e2070e978a345de47d0/');
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
       tx.message.recentBlockhash = blockhash;
 
       // 4. Sign the transaction locally
-      console.log('Signing transaction');
+      logger.log('Signing transaction');
       tx.sign([mintKeypair, kp]);
 
       // 5. Send the signed transaction to Solana with retry logic
       try {
-        console.log('Sending transaction to Solana');
+        logger.log('Sending transaction to Solana');
         const signature = await connection.sendTransaction(tx, {
           maxRetries: 3,
           preflightCommitment: 'confirmed',
           skipPreflight: false // Enable preflight checks
         });
 
-        console.log('Transaction sent:', signature);
+        logger.log('Transaction sent:', signature);
 
         // Wait for confirmation with timeout
-        console.log('Waiting for transaction confirmation');
+        logger.log('Waiting for transaction confirmation');
         const confirmation = await Promise.race([
           connection.confirmTransaction({
             signature,
@@ -535,11 +536,11 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
         ]) as TransactionConfirmation; // Use the existing TransactionConfirmation interface
 
         if (confirmation.value.err) {
-          console.error('Transaction failed:', confirmation.value.err);
+          logger.error('Transaction failed:', confirmation.value.err);
           throw new Error('Transaction failed: ' + JSON.stringify(confirmation.value.err));
         }
 
-        console.log('Transaction confirmed successfully');
+        logger.log('Transaction confirmed successfully');
         // Show modal with details
         setSuccessDetails({
           name: form.name,
@@ -553,14 +554,14 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
           tokenLink: `https://solscan.io/tx/${signature}`,
         });
       } catch (err: any) {
-        console.error('Transaction error:', err);
+        logger.error('Transaction error:', err);
         if (err.message.includes('memory allocation failed') || err.message.includes('insufficient compute units') || err.message.includes('out of memory')) {
           throw new Error('Transaction failed: Insufficient compute units. Please try again with a smaller initial buy amount.');
         }
         throw err;
       }
     } catch (err: any) {
-      console.error('Launch error:', err);
+      logger.error('Launch error:', err);
       setLaunchError(err.message || 'Failed to launch token');
     } finally {
       setLaunching(false);
@@ -578,7 +579,7 @@ const TokenForm: React.FC<{ solBalance: number | null }> = ({ solBalance }) => {
     try {
       await launchToken(solAmount);
     } catch (error: any) {
-      console.error('Launch error:', error);
+      logger.error('Launch error:', error);
       setLaunchError(error.message || 'Failed to launch token');
     }
   };
@@ -1050,7 +1051,7 @@ Never share this file with anyone.`;
 
       setShowBackup(false);
     } catch (err) {
-      console.error('Failed to backup wallet:', err);
+      logger.error('Failed to backup wallet:', err);
     }
   };
 
@@ -1384,7 +1385,7 @@ const TradeView: React.FC<{
 
       setTokens(tokensWithMetadata);
     } catch (err: any) {
-      console.error('Error loading tokens:', err);
+      logger.error('Error loading tokens:', err);
       setError(err.message || 'Failed to load tokens');
     } finally {
       setLoading(false);
@@ -1528,7 +1529,7 @@ const MyTokensView: React.FC<{
 
       setTokens(tokensWithMetadata);
     } catch (err: any) {
-      console.error('Error loading tokens:', err);
+      logger.error('Error loading tokens:', err);
       setError(err.message || 'Failed to load tokens');
     } finally {
       setLoading(false);

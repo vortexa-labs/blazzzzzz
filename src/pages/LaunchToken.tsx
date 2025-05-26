@@ -7,6 +7,7 @@ import { scrapePageData, mapScrapedDataToForm } from '../utils/webScraper';
 import { TokenFormData } from '../types/token';
 import { API_ENDPOINTS } from '../config/api';
 import SuccessModal from '../components/SuccessModal';
+import { logger } from '../utils/logger';
 
 type FormState = {
   [K in keyof TokenFormData]: string;
@@ -65,11 +66,11 @@ const LaunchToken: React.FC = () => {
             setImageFile(file);
             setImagePreview(formData.image);
           } catch (error) {
-            console.error('Error fetching scraped image:', error);
+            logger.error('Error fetching scraped image:', error);
           }
         }
       } catch (error) {
-        console.error('Error initializing form with scraped data:', error);
+        logger.error('Error initializing form with scraped data:', error);
       }
     };
 
@@ -130,7 +131,7 @@ const LaunchToken: React.FC = () => {
   };
 
   const handleLaunchClick = (e: React.FormEvent) => {
-    console.log('[LaunchToken] Launch button clicked');
+    logger.log('Token launch initiated');
     e.preventDefault();
     const newErrors: { [key: string]: string } = {};
     if (!form.name.trim()) newErrors.name = '* Token name is required';
@@ -139,7 +140,7 @@ const LaunchToken: React.FC = () => {
     if (!imageFile && !form.image) newErrors.image = '* Token image is required (upload an image file)';
     setErrors(newErrors);
     if (Object.keys(newErrors).length === 0) setShowModal(true);
-    console.log('[LaunchToken] Validation errors:', newErrors);
+    logger.log('[LaunchToken] Validation errors:', newErrors);
   };
 
   // Add a helper to convert image URL to base64
@@ -155,7 +156,7 @@ const LaunchToken: React.FC = () => {
   };
 
   const launchToken = async (buyAmount: string) => {
-    console.log('[LaunchToken] Starting launchToken with amount:', buyAmount);
+    logger.log('[LaunchToken] Starting launchToken with amount:', buyAmount);
     setLaunching(true);
     setLaunchError(null);
     setLaunchSuccess(null);
@@ -284,7 +285,7 @@ const LaunchToken: React.FC = () => {
         if (typeof chrome !== 'undefined' && chrome.storage?.local) {
           chrome.storage.local.remove('tokenData');
         }
-        console.log('[LaunchToken] Launch successful, form and storage cleared.');
+        logger.log('[LaunchToken] Launch successful, form and storage cleared.');
       } catch (err: any) {
         if (err.message.includes('memory allocation failed') || err.message.includes('insufficient compute units') || err.message.includes('out of memory')) {
           throw new Error('Transaction failed: Insufficient compute units. Please try again with a smaller initial buy amount.');
@@ -296,6 +297,7 @@ const LaunchToken: React.FC = () => {
     } finally {
       setLaunching(false);
     }
+    logger.log('Token launch completed');
   };
 
   const handleModalConfirm = async () => {

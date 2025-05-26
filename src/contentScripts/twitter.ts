@@ -1,4 +1,5 @@
 import { TokenFormData } from '../types/token';
+import { logger } from '../utils/logger';
 
 interface TweetData {
   text: string;
@@ -29,7 +30,7 @@ function initializeContentScript() {
   const isValidPage = VALID_PAGES.some(page => currentUrl.includes(page));
   
   if (isValidPage) {
-    console.log('Initializing content script on:', currentUrl);
+    logger.log('Initializing content script on:', currentUrl);
     injectCreateTokenButton();
   }
 }
@@ -71,35 +72,35 @@ function injectCreateTokenButton() {
   btn.onmouseenter = () => btn.style.background = '#ff4646';
   btn.onmouseleave = () => btn.style.background = '#FF3131';
   btn.onclick = () => {
-    console.log('Create Token button clicked');
+    logger.log('Create Token button clicked');
     activateTweetSelectionMode();
   };
   document.body.appendChild(btn);
 }
 
 function activateTweetSelectionMode() {
-  console.log('Activating tweet selection mode');
+  logger.log('Activating tweet selection mode');
   tweetSelectionMode = true;
   document.body.style.cursor = 'crosshair';
   document.body.classList.add('blazr-selecting-tweet');
   
   const tweets = document.querySelectorAll(TWEET_SELECTOR);
-  console.log('Found tweets:', tweets.length);
+  logger.log('Found tweets:', tweets.length);
   
   // Highlight all tweets and add listeners
   tweets.forEach((tweet, index) => {
-    console.log(`Setting up tweet ${index + 1}`);
+    logger.log(`Setting up tweet ${index + 1}`);
     addTweetHighlight(tweet as HTMLElement);
     const mouseenter = () => {
-      console.log(`Mouse entered tweet ${index + 1}`);
+      logger.log(`Mouse entered tweet ${index + 1}`);
       highlightTweet(tweet as HTMLElement);
     };
     const mouseleave = () => {
-      console.log(`Mouse left tweet ${index + 1}`);
+      logger.log(`Mouse left tweet ${index + 1}`);
       unhighlightTweet(tweet as HTMLElement);
     };
     const click = (e: Event) => {
-      console.log(`Tweet ${index + 1} clicked`);
+      logger.log(`Tweet ${index + 1} clicked`);
       onTweetClick(e, tweet as HTMLElement);
     };
     tweet.addEventListener('mouseenter', mouseenter);
@@ -125,9 +126,9 @@ function unhighlightTweet(tweet: HTMLElement) {
 }
 
 function onTweetClick(e: Event, tweet: HTMLElement) {
-  console.log('onTweetClick called, tweetSelectionMode:', tweetSelectionMode);
+  logger.log('onTweetClick called, tweetSelectionMode:', tweetSelectionMode);
   if (!tweetSelectionMode) {
-    console.log('Tweet selection mode is off, ignoring click');
+    logger.log('Tweet selection mode is off, ignoring click');
     return;
   }
   e.preventDefault();
@@ -137,13 +138,13 @@ function onTweetClick(e: Event, tweet: HTMLElement) {
   // Show loading state
   tweet.style.opacity = '0.7';
   const tweetData = extractTweetData(tweet);
-  console.log('Extracted tweet data:', tweetData);
+  logger.log('Extracted tweet data:', tweetData);
   // Send to background/sidepanel for OpenAI processing and form prefill
   chrome.runtime.sendMessage({
     type: 'TWEET_SELECTED',
     data: tweetData
   }, (response) => {
-    console.log('Message sent to background script, response:', response);
+    logger.log('Message sent to background script, response:', response);
   });
   setTimeout(() => { tweet.style.opacity = '1'; }, 1000);
 }
@@ -191,17 +192,17 @@ const extractTweetData = (tweetElement: HTMLElement): TweetData => {
 
 // Listen for extension message to activate tweet selection
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Content script received message:', message);
+  logger.log('Content script received message:', message);
   if (message.type === 'ACTIVATE_TWEET_SELECTION') {
     activateTweetSelectionMode();
   }
 });
 
 function handleTweetClick(event: MouseEvent) {
-  console.log('Tweet clicked, extracting data...');
+  logger.log('Tweet clicked, extracting data...');
   const tweetElement = (event.target as HTMLElement).closest('article');
   if (!tweetElement) {
-    console.log('No tweet element found');
+    logger.log('No tweet element found');
     return;
   }
 
@@ -214,7 +215,7 @@ function handleTweetClick(event: MouseEvent) {
     .filter((src): src is string => src !== null);
   const tweetUrl = window.location.href;
 
-  console.log('Extracted tweet data:', {
+  logger.log('Extracted tweet data:', {
     text: tweetText.substring(0, 50) + '...',
     authorName,
     hasAvatar: !!authorAvatar,
@@ -233,6 +234,8 @@ function handleTweetClick(event: MouseEvent) {
       authorAvatar
     }
   }, response => {
-    console.log('Received response from background script:', response);
+    logger.log('Received response from background script:', response);
   });
-} 
+}
+
+logger.log('Twitter content script updated'); 

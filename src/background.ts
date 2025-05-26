@@ -1,5 +1,6 @@
 import { TokenFormData } from './types/token';
 import { API_ENDPOINTS } from './config/api';
+import { logger } from './utils/logger';
 
 interface Message {
   type: string;
@@ -24,13 +25,13 @@ async function openSidePanel() {
       throw new Error('No window ID available');
     }
   } catch (err) {
-    console.error('Failed to open side panel:', err);
+    logger.error('Failed to open side panel:', err);
   }
 }
 
 // Helper function to make API requests
 async function makeApiRequest(endpoint: string, method: string, data?: any) {
-  const response = await fetch(`http://localhost:4000${endpoint}`, {
+  const response = await fetch(`https://blazzzzzz-111.onrender.com${endpoint}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -53,7 +54,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         sendResponse({ success: true, data });
       })
       .catch(error => {
-        console.error('Token accounts fetch error:', error);
+        logger.error('Token accounts fetch error:', error);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -90,8 +91,8 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
         });
       })
       .catch(err => {
-        console.error('Failed to generate token metadata:', err);
-        console.error('Error details:', {
+        logger.error('Failed to generate token metadata:', err);
+        logger.error('Error details:', {
           message: err.message,
           stack: err.stack,
           type: err.name
@@ -107,9 +108,9 @@ chrome.runtime.onMessage.addListener((message: Message, sender, sendResponse) =>
       if (tabs[0]?.id) {
         chrome.sidePanel.open({ tabId: tabs[0].id }, () => {
           if (chrome.runtime.lastError) {
-            console.error("Failed to open side panel:", chrome.runtime.lastError.message);
+            logger.error("Failed to open side panel:", chrome.runtime.lastError.message);
           } else {
-            console.log("Side panel opened");
+            logger.log("Side panel opened");
             // Try to close the popup window if sender is a popup
             if (sender && sender.tab && sender.tab.windowId) {
               chrome.windows.remove(sender.tab.windowId);

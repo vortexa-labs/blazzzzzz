@@ -1,6 +1,7 @@
 import { Keypair } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
 import { WalletStorage } from '../services/wallet/types';
+import { logger } from './logger';
 
 interface StoredWallet {
   publicKey: string;
@@ -24,7 +25,7 @@ export const getAllStoredWallets = async (): Promise<StoredWallet[]> => {
                 lastUsed: walletData.lastUsed || Date.now()
               });
             } catch (error) {
-              console.error('Error parsing wallet data:', error);
+              logger.error('Error parsing wallet data:', error);
             }
           }
         });
@@ -46,7 +47,7 @@ export const getAllStoredWallets = async (): Promise<StoredWallet[]> => {
             lastUsed: walletData.lastUsed || Date.now()
           });
         } catch (error) {
-          console.error('Error parsing wallet data:', error);
+          logger.error('Error parsing wallet data:', error);
         }
       }
     }
@@ -82,7 +83,7 @@ export const getWalletFromStorage = async (): Promise<WalletStorage> => {
       };
     }
   } catch (error) {
-    console.error('Error getting wallet from storage:', error);
+    logger.error('Error getting wallet from storage:', error);
     return { blazr_wallet: undefined, blazr_api_key: undefined };
   }
 };
@@ -102,8 +103,9 @@ export const saveWalletToStorage = async (walletObj: WalletStorage): Promise<voi
         localStorage.setItem('blazr_api_key', walletObj.blazr_api_key);
       }
     }
+    logger.log('Wallet saved to storage');
   } catch (error) {
-    console.error('Error saving wallet to storage:', error);
+    logger.error('Failed to save wallet to storage:', error);
     throw error;
   }
 };
@@ -118,6 +120,7 @@ export const generateNewWallet = async (): Promise<WalletStorage> => {
     }
   };
   await saveWalletToStorage(walletStorage);
+  logger.log('Wallet created and saved');
   return walletStorage;
 };
 
@@ -142,7 +145,7 @@ export const clearWalletFromStorage = async (): Promise<void> => {
       localStorage.removeItem('blazr_api_key');
     }
   } catch (error) {
-    console.error('Error clearing wallet from storage:', error);
+    logger.error('Error clearing wallet from storage:', error);
     throw error;
   }
 };

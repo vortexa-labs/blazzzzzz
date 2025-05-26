@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 /**
  * Resizes an image to a square (1:1) aspect ratio
  * @param file The image file to resize
@@ -49,11 +51,13 @@ export const resizeImageToSquare = async (file: File, size: number = 512): Promi
 
           // Clean up the object URL
           URL.revokeObjectURL(objectUrl);
+          logger.log('Image resized successfully');
           resolve(resizedFile);
         }, file.type, 0.95); // 0.95 quality for good compression
       } catch (error) {
         // Clean up the object URL
         URL.revokeObjectURL(objectUrl);
+        logger.error('Image resize failed:', error);
         reject(error);
       }
     };
@@ -61,7 +65,7 @@ export const resizeImageToSquare = async (file: File, size: number = 512): Promi
     img.onerror = (error) => {
       // Clean up the object URL
       URL.revokeObjectURL(objectUrl);
-      console.error('Image load error:', error);
+      logger.error('Image load error:', error);
       reject(new Error('Could not load image. Please try a different file.'));
     };
   });
@@ -74,7 +78,7 @@ export const resizeImageToSquare = async (file: File, size: number = 512): Promi
  * @returns boolean Whether the file is valid
  */
 export const validateImage = (file: File, maxSizeInMB: number = 5): boolean => {
-  console.log('Validating file:', {
+  logger.log('Validating file:', {
     name: file.name,
     type: file.type,
     size: file.size
@@ -92,5 +96,6 @@ export const validateImage = (file: File, maxSizeInMB: number = 5): boolean => {
     throw new Error(`Image must be smaller than ${maxSizeInMB}MB. Current size: ${(file.size / (1024 * 1024)).toFixed(2)}MB`);
   }
 
+  logger.log('Image validation passed');
   return true;
 }; 

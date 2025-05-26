@@ -11,6 +11,7 @@ import {
   Token
 } from './types';
 import { API_ENDPOINTS } from '../../config/api';
+import { logger } from '../../utils/logger';
 
 export async function getSwapQuote(
   fromToken: string,
@@ -56,10 +57,10 @@ export const getTokenDetails = async (mint: string): Promise<Token> => {
       throw new Error('Failed to fetch token details');
     }
     const data = await response.json();
-    console.log('Token details:', data);
+    logger.log('Token details:', data);
     return data;
   } catch (error) {
-    console.error('Error fetching token details:', error);
+    logger.error('Error fetching token details:', error);
     throw error;
   }
 };
@@ -71,10 +72,10 @@ export const getTokensList = async (): Promise<Token[]> => {
       throw new Error('Failed to fetch tokens list');
     }
     const data = await response.json();
-    console.log('Tokens list:', data);
+    logger.log('Tokens list:', data);
     return data;
   } catch (error) {
-    console.error('Error fetching tokens list:', error);
+    logger.error('Error fetching tokens list:', error);
     throw error;
   }
 };

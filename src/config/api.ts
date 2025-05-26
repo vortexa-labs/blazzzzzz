@@ -1,4 +1,4 @@
-export const API_BASE_URL = 'http://localhost:4000';
+export const API_BASE_URL = 'https://blazzzzzz-111.onrender.com';
 
 export const API_ENDPOINTS = {
   TRADE_LOCAL: `${API_BASE_URL}/api/trade-local`,

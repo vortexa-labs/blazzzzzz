@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from '../services/wallet/hooks';
 import { WalletBalance } from '../services/wallet/types';
 import { ArrowPathIcon } from '@heroicons/react/24/outline';
+import { logger } from '../utils/logger';
 
 interface TokenData {
   mint: string;
@@ -43,7 +44,7 @@ const Portfolio: React.FC = () => {
       const publicKey = keypair.publicKey.toBase58();
       
       // Fetch token accounts using the background script
-      console.log('Fetching tokens for:', publicKey);
+      logger.log('Fetching tokens for:', publicKey);
       const response = await new Promise<TokenResponse>((resolve, reject) => {
         chrome.runtime.sendMessage(
           { 
@@ -66,7 +67,7 @@ const Portfolio: React.FC = () => {
       const tokenArray = Object.values(response.tokens) as TokenData[];
       setTokenBalances(tokenArray);
     } catch (error) {
-      console.error('Error fetching tokens:', error);
+      logger.error('Error fetching tokens:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch tokens');
     } finally {
       setIsLoading(false);

@@ -12,6 +12,7 @@ import BottomNav from './components/BottomNav';
 import { createRoot } from 'react-dom/client';
 import Settings from './pages/Settings';
 import { SessionProvider } from './context/SessionContext';
+import { logger } from './utils/logger';
 
 // @ts-ignore
 // eslint-disable-next-line no-var
@@ -103,10 +104,10 @@ const Sidepanel: React.FC = () => {
         });
         await chrome.sidePanel.open(); // No arguments!
       } else {
-        console.warn('Side panel API not available in this context.');
+        logger.warn('Side panel API not available in this context.');
       }
     } catch (error) {
-      console.error('Failed to open side panel:', error);
+      logger.error('Failed to open side panel:', error);
     }
   };
 

@@ -7,6 +7,7 @@ import { useWallet } from '../services/wallet/hooks';
 import { useSession } from '../context/SessionContext';
 import SuccessModal from '../components/SuccessModal';
 import bs58 from 'bs58';
+import { logger } from '../utils/logger';
 
 const uint8ArrayToBase64 = (bytes: Uint8Array): string => {
   return btoa(String.fromCharCode.apply(null, Array.from(bytes)));
@@ -108,7 +109,7 @@ const Wallet: React.FC = () => {
       const cleanedKey = importPrivateKey.trim().replace(/['"]/g, '');
       
       // Log the cleaned key for debugging
-      console.log('Attempting to import with cleaned key:', cleanedKey);
+      logger.log('Attempting to import with cleaned key:', cleanedKey);
       
       await importWallet(cleanedKey);
       
@@ -122,7 +123,7 @@ const Wallet: React.FC = () => {
       // Show success message with session info
       setImportSuccessMessage('Wallet imported successfully! Your session remains active.');
     } catch (err: any) {
-      console.error('Import error:', err);
+      logger.error('Import error:', err);
       setError(err.message || 'Failed to import wallet');
     } finally {
       setIsLoading(false);

@@ -5,6 +5,7 @@ import { getWalletKeypair, saveWalletToStorage } from '../utils/wallet';
 import { WalletStorage } from '../services/wallet/types';
 import WalletBackup from './WalletBackup';
 import SuccessModal from './SuccessModal';
+import { logger } from '../utils/logger';
 
 const Wallet: React.FC = () => {
   const [keypair, setKeypair] = useState<Keypair | null>(null);
@@ -76,7 +77,7 @@ const Wallet: React.FC = () => {
       setShowImportModal(false);
       setPrivateKeyInput('');
     } catch (error) {
-      console.error('Import private key error:', error);
+      logger.error('Import private key error:', error);
       setImportError('❌ Invalid private key format. Please check and try again.');
     }
   };
@@ -94,6 +95,8 @@ const Wallet: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [importSuccessMessage]);
+
+  logger.log('Wallet component updated');
 
   return (
     <div className="p-4">

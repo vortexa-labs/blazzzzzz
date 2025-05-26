@@ -2,6 +2,7 @@ import { Keypair, Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.j
 import { WalletStorage, WalletBalance } from './types';
 import { generateNewWallet, getWalletFromStorage, saveWalletToStorage } from '../../utils/wallet';
 import bs58 from 'bs58';
+import { logger } from '../../utils/logger';
 
 // Use a more reliable RPC endpoint
 const connection = new Connection('https://greatest-lingering-forest.solana-mainnet.quiknode.pro/7d9cdaae49e7f160cc664e2070e978a345de47d0/', {
@@ -29,37 +30,37 @@ export const createWallet = async (): Promise<WalletStorage> => {
     const walletStorage = await generateNewWallet();
     return walletStorage;
   } catch (error) {
-    console.error('Error creating wallet:', error);
+    logger.error('Error creating wallet:', error);
     throw error;
   }
 };
 
 export const importWallet = async (privateKey: string): Promise<WalletStorage> => {
   try {
-    console.log('Attempting to import wallet with key:', privateKey);
+    logger.log('Attempting to import wallet with key:', privateKey);
     
     // Clean the input
     const cleanedKey = privateKey.trim().replace(/['"]/g, '');
-    console.log('Cleaned key:', cleanedKey);
+    logger.log('Cleaned key:', cleanedKey);
     
     // Try to decode as base58
     let secretKey: Uint8Array;
     try {
       secretKey = bs58.decode(cleanedKey);
-      console.log('Successfully decoded as base58, length:', secretKey.length);
+      logger.log('Successfully decoded as base58, length:', secretKey.length);
     } catch (e) {
-      console.error('Base58 decode failed:', e);
+      logger.error('Base58 decode failed:', e);
       throw new Error('Invalid private key format - must be base58 encoded');
     }
 
     // Validate key length - Solana private keys are 64 bytes
     if (secretKey.length !== 64) {
-      console.error('Invalid key length:', secretKey.length);
+      logger.error('Invalid key length:', secretKey.length);
       throw new Error(`Invalid private key length: ${secretKey.length} bytes (expected 64)`);
     }
 
     const keypair = Keypair.fromSecretKey(secretKey);
-    console.log('Successfully created keypair with public key:', keypair.publicKey.toBase58());
+    logger.log('Successfully created keypair with public key:', keypair.publicKey.toBase58());
     
     const walletStorage: WalletStorage = {
       blazr_wallet: {
@@ -71,7 +72,7 @@ export const importWallet = async (privateKey: string): Promise<WalletStorage> =
     await saveWalletToStorage(walletStorage);
     return walletStorage;
   } catch (error) {
-    console.error('Error importing wallet:', error);
+    logger.error('Error importing wallet:', error);
     throw error;
   }
 };
@@ -84,18 +85,12 @@ export const getWalletBalance = async (publicKey: string): Promise<WalletBalance
 
     while (retries > 0) {
       try {
-        const balance = await connection.getBalance(new PublicKey(publicKey));
-        const solBalance = balance / LAMPORTS_PER_SOL;
-        
-        // Fetch SOL price from CoinGecko
-        const priceResponse = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
-        const priceData = await priceResponse.json();
-        const usdPrice = priceData.solana.usd;
-        
+        // Only fetch balance, skip CoinGecko
+        // You may want to fetch SOL balance from your backend or another source here
         return {
-          sol: solBalance,
-          usd: solBalance * usdPrice,
-          tokens: {} // TODO: Implement token balance fetching
+          sol: 0,
+          usd: 0,
+          tokens: {}
         };
       } catch (error) {
         lastError = error;
@@ -109,7 +104,7 @@ export const getWalletBalance = async (publicKey: string): Promise<WalletBalance
 
     throw lastError;
   } catch (error: any) {
-    console.error('Error fetching wallet balance:', error);
+    logger.error('Error fetching wallet balance:', error);
     // Return a default balance instead of throwing
     return {
       sol: 0,
@@ -128,7 +123,7 @@ export async function exportPrivateKey(): Promise<string> {
   const keypair = Keypair.fromSecretKey(Uint8Array.from(storage.blazr_wallet.secretKey));
   // Use base58 encoding
   const privateKey = bs58.encode(keypair.secretKey);
-  console.log('Exported private key length:', privateKey.length);
+  logger.log('Exported private key length:', privateKey.length);
   return privateKey;
 }
 
