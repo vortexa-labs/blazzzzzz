@@ -771,7 +771,9 @@ app.post('/api/rpc/token-accounts', async (req, res) => {
 
 // --- Trade Local Endpoint ---
 app.post('/api/trade-local', async (req, res) => {
+  console.log('--- /api/trade-local handler entered ---');
   try {
+    console.log('Incoming request body:', JSON.stringify(req.body, null, 2));
     logger.log(`Received /api/trade-local request for action: ${req.body.action}`, {
       action: req.body.action,
       publicKey: req.body.publicKey ? `${req.body.publicKey.slice(0, 4)}...${req.body.publicKey.slice(-4)}` : undefined,
@@ -857,17 +859,7 @@ app.post('/api/trade-local', async (req, res) => {
     }
 
     // Log the final payload with all fields
-    logger.log('Final request payload for Pump Portal:', {
-      action: requestBodyForPumpPortal.action,
-      publicKey: `${requestBodyForPumpPortal.publicKey.slice(0, 4)}...${requestBodyForPumpPortal.publicKey.slice(-4)}`,
-      mint: `${requestBodyForPumpPortal.mint.slice(0, 4)}...${requestBodyForPumpPortal.mint.slice(-4)}`,
-      amount: requestBodyForPumpPortal.amount,
-      denominatedInSol: requestBodyForPumpPortal.denominatedInSol,
-      slippage: requestBodyForPumpPortal.slippage,
-      priorityFee: requestBodyForPumpPortal.priorityFee,
-      pool: requestBodyForPumpPortal.pool,
-      computeUnits: requestBodyForPumpPortal.computeUnits
-    });
+    logger.log('Final request payload for Pump Portal:', requestBodyForPumpPortal);
 
     const pumpPortalResponse = await axios.post('https://pumpportal.fun/api/trade-local', requestBodyForPumpPortal, {
       timeout: 60000,
@@ -923,8 +915,10 @@ app.post('/api/trade-local', async (req, res) => {
 
     res.set('Content-Type', 'application/octet-stream');
     res.send(responseDataBuffer);
+    console.log('--- /api/trade-local response sent ---');
   } catch (error) {
-    logger.error('Trade error in /api/trade-local:', error.message);
+    console.error('Trade error in /api/trade-local:', error.message, error.stack);
+    logger.error('Trade error in /api/trade-local:', error.message, error.stack);
     
     let status = 500;
     let errorResponse = {
